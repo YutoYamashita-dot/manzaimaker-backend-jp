@@ -283,6 +283,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 下記の各技法は **すべて** 本文中で最低1回以上、観客に伝わる具体的な台詞や展開として **必ず** 用いること（未使用は不可）。",
     "- 出力前に **自己チェック** を行い、未使用の技法がある場合は **本文を追記** して満たしてから出力を終えること。",
     "- 技法名や“この技法を使う”といったメタ表現は本文に **絶対に書かない**。",
+    "- 自己検証時は《TAG:要素名》の**一時タグ法**を内部で用いてよいが、**最終出力では必ず全削除**しタグを残さないこと。",
     guideline || "",
     "",
     "■分量・形式の厳守",
@@ -305,6 +306,10 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     // ▼▼▼ 最終チェックリスト ▼▼▼
     `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
     `- すべての「採用する技法」を1回以上使ったか？`,
+    `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
+    `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
+    `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
+    `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
     `- 文字数は ${minLen}〜${maxLen} か？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
@@ -326,10 +331,15 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     `・少なくとも ${remainingChars} 文字以上、自然に展開し、最後は ${tsukkomiName}: もういいよ！ で締める`,
     "・各行は「名前: セリフ」の形式（半角コロン＋スペース）",
     "・台詞同士の間には必ず空行を1つ挟む",
+    "・自己検証時は《TAG:要素名》の一時タグ法を内部で使って良いが、出力直前に必ず全削除すること（タグを残さない）",
     "",
     // ▼▼▼ 最終チェックリスト（続き生成にも適用） ▼▼▼
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
     "- すべての「採用する技法」を1回以上使ったか？",
+    "- 「意外性」があるが「納得感」のある笑える表現を使っているか？",
+    "- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？",
+    "- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？",
+    "- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？",
     "- 文字数は \\${minLen}〜\\${maxLen} か？",
     "− 各台詞は「名前: セリフ」形式か？",
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
@@ -349,7 +359,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0,
+    temperature: 0.3,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -390,11 +400,17 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const checklist = [
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
     `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
+    `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
+    `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
+    `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
+    `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
     `- 文字数は ${minLen}〜${maxLen} か？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
     "- タイトルと本文の間に空行があるか？",
     "→ 1つでもNoなら、即座に本文を修正して満たしてから出力。",
+    "",
+    "※自己検証時は《TAG:要素名》の一時タグ法（例：TAG:伏線回収, TAG:比喩 等）を内部で用いてよいが、出力直前に必ず全削除し、本文にタグを一切残さないこと。",
   ].join("\n");
 
   const verifyPrompt = [
@@ -408,7 +424,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   ].join("\n");
 
   const messages = [
-    { role: "system", content: "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。" },
+    { role: "system", content: "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。一時タグは出力に残さないこと。" },
     { role: "user", content: verifyPrompt },
   ];
 
@@ -416,7 +432,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0,
+    temperature: 0.3,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -473,7 +489,7 @@ export default async function handler(req, res) {
     const payload = {
       model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
       messages,
-      temperature: 0,
+      temperature: 0.3,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
