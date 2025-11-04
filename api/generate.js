@@ -97,7 +97,7 @@ async function consumeAfterSuccess(user_id) {
 ========================= */
 const BOKE_DEFS = {
   IIMACHIGAI:
-    "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ（例：「カニ食べ行こう」→「紙食べ行こう？」）。",
+    "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
   HIYU: "比喩ボケ：比喩で誇張してのボケ",
   GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
   GIJI_RONRI:
