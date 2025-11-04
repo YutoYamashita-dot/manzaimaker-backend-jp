@@ -1,5 +1,3 @@
-
-
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
 // 必須: XAI_API_KEY
@@ -222,7 +220,7 @@ function buildGuidelineFromSelections({ boke = [], tsukkomi = [], general = [] }
 }
 
 function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
-  const toLabel = (ids, table) => ids.filter((k) => table[k]).map((k) => table[k].split("：")[0]);
+  const toLabel = (ids, table) => ids.filter((k) => table[k]).map((k) => table[k].split("」")[0]).map(s => s.replace(/^.*?：?/, ""));
   return {
     boke: toLabel(boke, BOKE_DEFS),
     tsukkomi: toLabel(tsukkomi, TSUKKOMI_DEFS),
@@ -303,8 +301,15 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 人間にとって「意外性」があるが「納得感」のある表現を使う。",
     "- 登場人物の個性を反映する。",
     "- 観客がしっかり笑える表現にする。",
-   
-
+    "",
+    // ▼▼▼ 最終チェックリスト ▼▼▼
+    `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
+    `- すべての「採用する技法」を1回以上使ったか？`,
+    `- 文字数は ${minLen}〜${maxLen} か？`,
+    `- 各台詞は「名前: セリフ」形式か？`,
+    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    `- タイトルと本文の間に空行があるか？`,
+    `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
 
   return { prompt, techniquesForMeta, structureMeta, maxLen, minLen, tsukkomiName, targetLen };
@@ -321,6 +326,15 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     `・少なくとも ${remainingChars} 文字以上、自然に展開し、最後は ${tsukkomiName}: もういいよ！ で締める`,
     "・各行は「名前: セリフ」の形式（半角コロン＋スペース）",
     "・台詞同士の間には必ず空行を1つ挟む",
+    "",
+    // ▼▼▼ 最終チェックリスト（続き生成にも適用） ▼▼▼
+    "■最終出力前に必ずこのチェックリストを頭の中で確認：",
+    "- すべての「採用する技法」を1回以上使ったか？",
+    "- 文字数は \\${minLen}〜\\${maxLen} か？",
+    "− 各台詞は「名前: セリフ」形式か？",
+    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    "- タイトルと本文の間に空行があるか？",
+    "→ 1つでもNoなら、即座に修正してから出力。",
     "",
     "【これまでの本文】",
     seed,
@@ -367,6 +381,55 @@ function normalizeError(err) {
     data: err?.response?.data ?? err?.error,
     stack: process.env.NODE_ENV === "production" ? undefined : err?.stack,
   };
+}
+
+/* =========================
+  5.5) 本文の自己検証＆自動修正パス（不足技法があれば追記/修正）
+========================= */
+async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [], minLen, maxLen, tsukkomiName }) {
+  const checklist = [
+    "■最終出力前に必ずこのチェックリストを頭の中で確認：",
+    `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
+    `- 文字数は ${minLen}〜${maxLen} か？`,
+    `- 各台詞は「名前: セリフ」形式か？`,
+    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    "- タイトルと本文の間に空行があるか？",
+    "→ 1つでもNoなら、即座に本文を修正して満たしてから出力。",
+  ].join("\n");
+
+  const verifyPrompt = [
+    "以下の本文を厳密に審査し、基準を1つでも満たさない場合は本文を**修正した完全版**を出力してください。",
+    "満たしている場合は**本文をそのまま**出力してください。",
+    "",
+    checklist,
+    "",
+    "【本文】",
+    body,
+  ].join("\n");
+
+  const messages = [
+    { role: "system", content: "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。" },
+    { role: "user", content: verifyPrompt },
+  ];
+
+  const approxTok = Math.min(8192, Math.ceil(Math.max(maxLen * 2, 2000) * 3));
+  const resp = await client.chat.completions.create({
+    model,
+    messages,
+    temperature: 0,
+    max_output_tokens: approxTok,
+    max_tokens: approxTok,
+  });
+
+  let revised = resp?.choices?.[0]?.message?.content?.trim() || body;
+
+  // 仕上げ整形（順序固定）
+  revised = normalizeSpeakerColons(revised);
+  revised = ensureBlankLineBetweenTurns(revised);
+  revised = ensureTsukkomiOutro(revised, tsukkomiName);
+  revised = enforceCharLimit(revised, minLen, maxLen, false);
+
+  return revised;
 }
 
 /* =========================
@@ -454,6 +517,25 @@ export default async function handler(req, res) {
       }
     }
 
+    // ★ 自己検証＆自動修正（採用する技法の担保）
+    // techniquesForMeta = Boke/Tsukkomi のラベル。構成系は structureMeta に入っているが、
+    // 厳密には「採用する技法」を担保したいので、ここでは techniquesForMeta を主対象にする。
+    const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
+    try {
+      body = await selfVerifyAndCorrectBody({
+        client,
+        model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+        body,
+        requiredTechs: requiredForCheck,
+        minLen,
+        maxLen,
+        tsukkomiName,
+      });
+    } catch (e) {
+      console.warn("[self-verify] failed:", e?.message || e);
+      // 検証が失敗しても致命的にはしない（本文は現状のまま続行）
+    }
+
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
@@ -501,5 +583,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Server Error", detail: e });
   }
 }
-
-
