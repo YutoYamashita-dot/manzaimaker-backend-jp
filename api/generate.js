@@ -46,7 +46,7 @@ async function incrementUsage(user_id, delta = 1) {
 }
 
 /* === ★ 課金ユーティリティ（後払い消費：失敗時は絶対に減らさない） === */
-const FREE_QUOTA = 20;
+const FREE_QUOTA = 500;
 
 async function getUsageRow(user_id) {
   if (!hasSupabase || !user_id) return { output_count: 0, paid_credits: 0 };
@@ -208,7 +208,7 @@ function splitTitleAndBody(s) {
 }
 
 /* =========================
-  4) ガイドライン生成（維持）
+  4) ガイドライン生成
 ========================= */
 function buildGuidelineFromSelections({ boke = [], tsukkomi = [], general = [] }) {
   const bokeLines = boke.filter((k) => BOKE_DEFS[k]).map((k) => `- ${BOKE_DEFS[k]}`);
@@ -295,7 +295,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- 最後は必ず ${tsukkomiName}: もういいよ の一行で締める（この行は文字数に含める）。`,
     "- 「比喩」「皮肉」「風刺」と直接本文に書かない。",
     "- 「緊張感のある状態」とそれが「緩和する状態」を必ず作る。",
-    "- 「選択された技法」をしっかり使う。",
+    "- 「採用する技法」をしっかり使う。",
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
     "- タイトルと本文の間には必ず空行を1つ入れる",
@@ -335,7 +335,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.1,
+    temperature: 0,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -410,7 +410,7 @@ export default async function handler(req, res) {
     const payload = {
       model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
       messages,
-      temperature: 0.8,
+      temperature: 0,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
