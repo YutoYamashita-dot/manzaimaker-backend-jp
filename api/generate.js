@@ -1,7 +1,7 @@
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
 // 必須: XAI_API_KEY
-// 任意: XAI_MODEL（未設定なら grok-4）
+// 任意: XAI_MODEL
 // 追加: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（ある場合、user_id の回数/クレジットを保存）
 
 export const config = { runtime: "nodejs" };
@@ -223,6 +223,58 @@ function splitTitleAndBody(s) {
   return { title, body };
 }
 
+/* === ★ 3.7) 「タイトルは必ず1つだけ」化（本文先頭の重複タイトル除去 & 必要なら抽出） === */
+function normalizeTitleString(str = "") {
+  return String(str)
+    .trim()
+    .replace(/^【|】$/g, "")
+    .replace(/^(タイトル|Title)\s*[:：]\s*/i, "")
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/\s+/g, " ");
+}
+function ensureSingleTitle(titleIn, bodyIn) {
+  let title = normalizeTitleString(titleIn || "");
+  let body = (bodyIn || "").replace(/\r\n/g, "\n");
+
+  // 先頭の空行を除去
+  let lines = body.split("\n");
+  while (lines.length && lines[0].trim() === "") lines.shift();
+
+  // 既存タイトルが無い場合、本文先頭が見出しならそれをタイトルとして抽出
+  if (!title && lines.length) {
+    const first = lines[0].trim();
+    if (
+      first.startsWith("#") ||
+      /^【.+】$/.test(first) ||
+      /^(タイトル|Title)\s*[:：]/i.test(first)
+    ) {
+      title = normalizeTitleString(first);
+      lines.shift();
+      while (lines.length && lines[0].trim() === "") lines.shift();
+    }
+  }
+
+  // 既存タイトルがある場合、本文先頭の同義タイトル行を除去
+  if (title && lines.length) {
+    const normTitle = normalizeTitleString(title);
+    const first = lines[0].trim();
+    const firstNorm = normalizeTitleString(first);
+    if (
+      first.startsWith("#") ||
+      /^【.+】$/.test(first) ||
+      /^(タイトル|Title)\s*[:：]/i.test(first) ||
+      firstNorm.toLowerCase() === normTitle.toLowerCase()
+    ) {
+      // 先頭行を除去（空行も1つまで）
+      lines.shift();
+      while (lines.length && lines[0].trim() === "") lines.shift();
+      title = normTitle;
+    }
+  }
+
+  return { title: title || "（タイトル未設定）", body: lines.join("\n") };
+}
+
 /* =========================
 4) ガイドライン生成
 ========================= */
@@ -315,7 +367,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 出力は本文のみ（解説・メタ記述や途中での打ち切りを禁止）。",
     `- 最後は必ず ${tsukkomiName}: もういいよ の一行で締める（この行は文字数に含める）。`,
     "- 「比喩」「皮肉」「風刺」と直接本文に書かない。",
-    "- 「緊張感のある状態」とそれが「緩和する状態」を必ず作る。",
+    "- 「緊張感のある状態」とそれが「緩和」する状態を必ず作る。",
     "- 「採用する技法」をしっかり使う。",
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
@@ -542,7 +594,11 @@ export default async function handler(req, res) {
 
     // 整形（★順序を安定化：normalize → 空行 → 落ち付与）
     let raw = completion?.choices?.[0]?.message?.content?.trim() || "";
-    let { title, body } = splitTitleAndBody(raw);
+    let split = splitTitleAndBody(raw);
+    // ★ タイトルは必ず1つ：本文先頭の重複タイトルを除去、必要なら抽出
+    const dedup = ensureSingleTitle(split.title, split.body);
+    let title = dedup.title;
+    let body = dedup.body;
 
     body = enforceCharLimit(body, minLen, Number.MAX_SAFE_INTEGER, true); // 上限で切らない
     body = normalizeSpeakerColons(body);
@@ -591,7 +647,7 @@ export default async function handler(req, res) {
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
-   // 成功判定：★本文非空のみ（語尾揺れで落とさない）
+    // 成功判定：★本文非空のみ（語尾揺れで落とさない）
     const success = typeof body === "string" && body.trim().length > 0;
     if (!success) {
       // 失敗：消費しない
