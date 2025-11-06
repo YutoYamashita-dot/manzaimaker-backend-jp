@@ -10,7 +10,7 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
 /* =========================
-  Supabase Client
+Supabase Client
 ========================= */
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -18,7 +18,7 @@ const hasSupabase = !!(SUPABASE_URL && SUPABASE_KEY);
 const supabase = hasSupabase ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 /* =========================
-  既存互換ユーティリティ（そのまま維持）
+既存互換ユーティリティ（そのまま維持）
 ========================= */
 async function incrementUsage(user_id, delta = 1) {
   if (!hasSupabase || !user_id) return null;
@@ -92,26 +92,40 @@ async function consumeAfterSuccess(user_id) {
   return { consumed: null };
 }
 
+/* === ★ 追加：購入反映ユーティリティ（credit_100 のみ 100 回付与） === */
+const ALLOWED_PRODUCT_ID = "credit_100";
+const CREDIT_100_AMOUNT = 100;
+
+async function addCreditsForPurchase(user_id, product_id) {
+  if (!hasSupabase || !user_id) throw new Error("Supabase not configured or user_id missing");
+  if (product_id !== ALLOWED_PRODUCT_ID) {
+    const err = new Error("Unsupported product_id");
+    err.status = 400;
+    throw err;
+  }
+  const row = await getUsageRow(user_id);
+  const paid = row.paid_credits ?? 0;
+  const nextPaid = paid + CREDIT_100_AMOUNT;
+  await setUsageRow(user_id, { output_count: row.output_count ?? 0, paid_credits: nextPaid });
+  return nextPaid;
+}
+
 /* =========================
-  1. 技法 定義テーブル（削除せず維持）
+1. 技法 定義テーブル（削除せず維持）
 ========================= */
 const BOKE_DEFS = {
-  IIMACHIGAI:
-    "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
+  IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
   HIYU: "比喩ボケ：比喩で誇張してのボケ",
   GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
-  GIJI_RONRI:
-    "擬似論理ボケ：論理風だが中身がズレているボケ。",
+  GIJI_RONRI: "擬似論理ボケ：論理風だが中身がズレているボケ。",
   TSUKKOMI_BOKE: "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
   RENSA: "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
   KOTOBA_ASOBI: "言葉遊び：ダジャレ・韻などで言語的にふざける。",
 };
 
 const TSUKKOMI_DEFS = {
-  ODOROKI_GIMON:
-    "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
-  AKIRE_REISEI:
-    "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
+  ODOROKI_GIMON: "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
+  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
   OKORI: "怒りツッコミ：怒ったような言い方でのツッコミ。",
   KYOKAN: "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
   META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。",
@@ -127,7 +141,7 @@ const GENERAL_DEFS = {
 };
 
 /* =========================
-  2) 旧仕様：ランダム技法（維持）
+2) 旧仕様：ランダム技法（維持）
 ========================= */
 const MUST_HAVE_TECH = "比喩ツッコミ";
 function pickTechniquesWithMetaphor() {
@@ -138,11 +152,15 @@ function pickTechniquesWithMetaphor() {
 }
 
 /* =========================
-  3) 文字数の最終調整
+3) 文字数の最終調整
 ========================= */
 function enforceCharLimit(text, minLen, maxLen, allowOverflow = false) {
   if (!text) return "";
-  let t = text.trim().replace(/```[\s\S]*?```/g, "").replace(/^#{1,6}\s.*$/gm, "").trim();
+  let t = text
+    .trim()
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/^#{1,6}\s.*$/gm, "")
+    .trim();
 
   if (!allowOverflow && t.length > maxLen) {
     const softCut = t.lastIndexOf("\n", maxLen);
@@ -158,7 +176,7 @@ function enforceCharLimit(text, minLen, maxLen, allowOverflow = false) {
 }
 
 /* =========================
-  3.5) 最終行の強制付与
+3.5) 最終行の強制付与
 ========================= */
 function ensureTsukkomiOutro(text, tsukkomiName = "B") {
   const outro = `${tsukkomiName}: もういいよ！`;
@@ -195,7 +213,7 @@ function ensureBlankLineBetweenTurns(text) {
 }
 
 /* =========================
-  3.6) タイトル/本文の分割
+3.6) タイトル/本文の分割
 ========================= */
 function splitTitleAndBody(s) {
   if (!s) return { title: "", body: "" };
@@ -206,7 +224,7 @@ function splitTitleAndBody(s) {
 }
 
 /* =========================
-  4) ガイドライン生成
+4) ガイドライン生成
 ========================= */
 function buildGuidelineFromSelections({ boke = [], tsukkomi = [], general = [] }) {
   const bokeLines = boke.filter((k) => BOKE_DEFS[k]).map((k) => `- ${BOKE_DEFS[k]}`);
@@ -220,7 +238,11 @@ function buildGuidelineFromSelections({ boke = [], tsukkomi = [], general = [] }
 }
 
 function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
-  const toLabel = (ids, table) => ids.filter((k) => table[k]).map((k) => table[k].split("」")[0]).map(s => s.replace(/^.*?：?/, ""));
+  const toLabel = (ids, table) =>
+    ids
+      .filter((k) => table[k])
+      .map((k) => table[k].split("」")[0])
+      .map((s) => s.replace(/^.*?：?/, ""));
   return {
     boke: toLabel(boke, BOKE_DEFS),
     tsukkomi: toLabel(tsukkomi, TSUKKOMI_DEFS),
@@ -229,7 +251,7 @@ function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
 }
 
 /* =========================
-  5) プロンプト生成（±10%バンド厳守）
+5) プロンプト生成（±10%バンド厳守）
 ========================= */
 function buildPrompt({ theme, genre, characters, length, selected }) {
   const safeTheme = theme?.toString().trim() || "身近な題材";
@@ -298,7 +320,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
     "- タイトルと本文の間には必ず空行を1つ入れる",
-　　"■その他",
+    "■その他",
     "- 人間にとって「意外性」があるが「納得感」のある表現を使う。",
     "- 登場人物の個性を反映する。",
     "- 観客がしっかり笑える表現にする。",
@@ -369,11 +391,10 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   cont = ensureBlankLineBetweenTurns(cont);
   cont = ensureTsukkomiOutro(cont, tsukkomiName);
   return (seed + "\n" + cont).trim();
-
 }
 
 /* =========================
-  6) Grok (xAI) 呼び出し
+6) Grok (xAI) 呼び出し
 ========================= */
 const client = new OpenAI({
   apiKey: process.env.XAI_API_KEY,
@@ -381,7 +402,7 @@ const client = new OpenAI({
 });
 
 /* =========================
-  失敗理由の整形
+失敗理由の整形
 ========================= */
 function normalizeError(err) {
   return {
@@ -394,7 +415,7 @@ function normalizeError(err) {
 }
 
 /* =========================
-  5.5) 本文の自己検証＆自動修正パス（不足技法があれば追記/修正）
+5.5) 本文の自己検証＆自動修正パス（不足技法があれば追記/修正）
 ========================= */
 async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [], minLen, maxLen, tsukkomiName }) {
   const checklist = [
@@ -449,11 +470,26 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
 }
 
 /* =========================
-  7) HTTP ハンドラ（後払い消費＋安定出力のための緩和）
+7) HTTP ハンドラ（後払い消費＋安定出力のための緩和）
 ========================= */
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
+
+    // ★ 追加：購入反映モード（credit_100 のみ 100 付与）
+    // フロント側で購入後に { action: "add_credit", product_id: "credit_100", user_id } を POST する想定。
+    if (req.body?.action === "add_credit") {
+      try {
+        const { user_id, product_id } = req.body || {};
+        if (!user_id) return res.status(400).json({ error: "user_id required" });
+        const nextPaid = await addCreditsForPurchase(user_id, product_id);
+        return res.status(200).json({ ok: true, paid_credits: nextPaid, product_id });
+      } catch (e) {
+        const ee = normalizeError(e);
+        const status = ee.status || 500;
+        return res.status(status).json({ error: "add_credit failed", detail: ee });
+      }
+    }
 
     const { theme, genre, characters, length, boke, tsukkomi, general, user_id } = req.body || {};
 
@@ -555,7 +591,7 @@ export default async function handler(req, res) {
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
-    // 成功判定：★本文非空のみ（語尾揺れで落とさない）
+   // 成功判定：★本文非空のみ（語尾揺れで落とさない）
     const success = typeof body === "string" && body.trim().length > 0;
     if (!success) {
       // 失敗：消費しない
