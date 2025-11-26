@@ -1,12 +1,12 @@
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
-// 必須: XAI_API_KEY
-// 任意: XAI_MODEL
+// 必須: GEMINI_API_KEY
+// 任意: GEMINI_MODEL
 // 追加: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（ある場合、user_id の回数/クレジットを保存）
 
 export const config = { runtime: "nodejs" };
 
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createClient } from "@supabase/supabase-js";
 
 /* =========================
@@ -446,12 +446,78 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
 }
 
 /* =========================
-6) Grok (xAI) 呼び出し
+6) Gemini 呼び出し（xAI 互換インターフェースでラップ）
 ========================= */
-const client = new OpenAI({
-  apiKey: process.env.XAI_API_KEY,
-  baseURL: "https://api.x.ai/v1",
-});
+
+const GEMINI_API_KEY = process.env.XAI_API_KEY; // 既存の環境変数名をそのまま利用
+const GEMINI_MODEL = process.env.XAI_MODEL || "gemini-3-flash";
+
+const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+
+async function createChatCompletionWithGemini({ model, messages, temperature, max_tokens, max_output_tokens }) {
+  if (!genAI) {
+    const err = new Error("XAI_API_KEY (Gemini API key) is not set");
+    err.status = 500;
+    throw err;
+  }
+
+  const modelName = model || GEMINI_MODEL;
+  const generativeModel = genAI.getGenerativeModel({ model: modelName });
+
+  const sysText = messages
+    .filter((m) => m.role === "system")
+    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+    .join("\n");
+
+  const otherText = messages
+    .filter((m) => m.role !== "system")
+    .map((m) => {
+      const prefix =
+        m.role === "user" ? "ユーザー" :
+        m.role === "assistant" ? "アシスタント" :
+        m.role;
+      return `${prefix}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`;
+    })
+    .join("\n");
+
+  const prompt = [sysText, otherText].filter(Boolean).join("\n\n");
+
+  const maxOutputTokens = max_output_tokens || max_tokens;
+
+  const result = await generativeModel.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: temperature ?? 0.3,
+      ...(maxOutputTokens ? { maxOutputTokens } : {}),
+    },
+  });
+
+  const text =
+    typeof result?.response?.text === "function"
+      ? result.response.text()
+      : (result?.response?.candidates?.[0]?.content?.parts?.[0]?.text || "");
+
+  return {
+    choices: [
+      {
+        message: { content: text },
+      },
+    ],
+  };
+}
+
+const client = {
+  chat: {
+    completions: {
+      create: createChatCompletionWithGemini,
+    },
+  },
+};
 
 /* =========================
 失敗理由の整形
@@ -570,14 +636,14 @@ export default async function handler(req, res) {
       },
     });
 
-    // モデル呼び出し（xAIは max_output_tokens を参照）★余裕UP
+    // モデル呼び出し（Geminiは maxOutputTokens を参照）★余裕UP
     const approxMaxTok = Math.min(8192, Math.ceil(Math.max(maxLen * 2, 3500) * 3));
     const messages = [
       { role: "system", content: "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。" },
       { role: "user", content: prompt },
     ];
     const payload = {
-      model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+      model: GEMINI_MODEL,
       messages,
       temperature: 0.3,
       max_output_tokens: approxMaxTok,
@@ -589,19 +655,19 @@ export default async function handler(req, res) {
       completion = await client.chat.completions.create(payload);
     } catch (err) {
       const e = normalizeError(err);
-      console.error("[xAI error]", e);
+      console.error("[xAI(Gemini) error]", e);
       // 後払い方式：ここでは消費しない
-      return res.status(e.status || 500).json({ error: "xAI request failed", detail: e });
+      return res.status(e.status || 500).json({ error: "Gemini request failed", detail: e });
     }
 
-    // 整形（★順序を安定化：normalize → 空行 → 落ち付与）
+    // レスポンスから本文取り出し
     let raw = completion?.choices?.[0]?.message?.content?.trim() || "";
     let split = splitTitleAndBody(raw);
+
     // ★ タイトルは必ず1つ：本文先頭の重複タイトルを除去、必要なら抽出
     const dedup = ensureSingleTitle(split.title, split.body);
     let title = dedup.title;
     let body = dedup.body;
-
     body = enforceCharLimit(body, minLen, Number.MAX_SAFE_INTEGER, true); // 上限で切らない
     body = normalizeSpeakerColons(body);
     body = ensureBlankLineBetweenTurns(body);
@@ -613,7 +679,7 @@ export default async function handler(req, res) {
       try {
         body = await generateContinuation({
           client,
-          model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+          model: GEMINI_MODEL,
           baseBody: body,
           remainingChars: deficit,
           tsukkomiName,
@@ -628,13 +694,11 @@ export default async function handler(req, res) {
     }
 
     // ★ 自己検証＆自動修正（採用する技法の担保）
-    // techniquesForMeta = Boke/Tsukkomi のラベル。構成系は structureMeta に入っているが、
-    // 厳密には「採用する技法」を担保したいので、ここでは techniquesForMeta を主対象にする。
     const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
     try {
       body = await selfVerifyAndCorrectBody({
         client,
-        model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+        model: GEMINI_MODEL,
         body,
         requiredTechs: requiredForCheck,
         minLen,
@@ -693,3 +757,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Server Error", detail: e });
   }
 }
+
