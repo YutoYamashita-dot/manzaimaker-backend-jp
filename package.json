@@ -9,11 +9,24 @@
     "dev-local": "vercel dev"
   },
   "dependencies": {
-    "openai": "^4.57.0",
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.45.0",
     "negotiator": "^0.6.3",
-    "@supabase/supabase-js": "^2.45.0"
+    "openai": "^4.57.0"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YutoYamashita-dot/manzaimaker-backend-jp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/YutoYamashita-dot/manzaimaker-backend-jp/issues"
+  },
+  "homepage": "https://github.com/YutoYamashita-dot/manzaimaker-backend-jp#readme"
 }
