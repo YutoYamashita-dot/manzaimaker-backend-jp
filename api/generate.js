@@ -449,14 +449,14 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
 6) Gemini 呼び出し（xAI 互換インターフェースでラップ）
 ========================= */
 
-const GEMINI_API_KEY = process.env.XAI_API_KEY; // 既存の環境変数名をそのまま利用
-const GEMINI_MODEL = process.env.XAI_MODEL || "gemini-3-flash";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash";
 
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 
 async function createChatCompletionWithGemini({ model, messages, temperature, max_tokens, max_output_tokens }) {
   if (!genAI) {
-    const err = new Error("XAI_API_KEY (Gemini API key) is not set");
+    const err = new Error("GEMINI_API_KEY (Gemini API key) is not set");
     err.status = 500;
     throw err;
   }
@@ -757,4 +757,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Server Error", detail: e });
   }
 }
-
