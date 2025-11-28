@@ -375,6 +375,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- タイトルと本文の間には必ず空行を1つ入れる",
     "■その他",
     "- 人間にとって「意外性」があるが「納得感」のある表現を使う。",
+    "- 現実的なことをネタにする。現実から飛躍したことを言わない。",
     "- 登場人物の個性を反映する。",
     "- 観客がしっかり笑える表現にする。",
     "",
@@ -389,6 +390,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
     `- タイトルと本文の間に空行があるか？`,
+    `- 現実的なことをネタにしているか？`,
     `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
 
@@ -417,8 +419,9 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？",
     "- 文字数は \\${minLen}〜\\${maxLen} か？",
     "− 各台詞は「名前: セリフ」形式か？",
-    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    "- 最後は ${tsukkomiName}: もういいよ！ か？",
     "- タイトルと本文の間に空行があるか？",
+    "- 現実的なことをネタにしているか？",
     "→ 1つでもNoなら、即座に修正してから出力。",
     "",
     "【これまでの本文】",
@@ -481,6 +484,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- 文字数は ${minLen}〜${maxLen} か？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    `- 現実的なことをネタにしているか？`,
     "- タイトルと本文の間に空行があるか？",
     // ★ ここから追記：禁止語句の厳格チェック
     "- 本文に『皮肉』『風刺』『緊張』『緩和』『伏線』『比喩』という語を**一切含めない**こと（英字・同義語例: irony, satire, tension, release, foreshadowing, metaphor も不可）。該当語がある場合は**別表現に必ず置換**してから出力すること。",
