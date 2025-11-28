@@ -390,7 +390,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
     `- タイトルと本文の間に空行があるか？`,
-    `- 現実的なことをネタにしているか？`,
+    `- 現実的なネタにしているか？`,
     `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
 
@@ -421,7 +421,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "− 各台詞は「名前: セリフ」形式か？",
     "- 最後は ${tsukkomiName}: もういいよ！ か？",
     "- タイトルと本文の間に空行があるか？",
-    "- 現実的なことをネタにしているか？",
+    "- 現実的なネタにしているか？",
     "→ 1つでもNoなら、即座に修正してから出力。",
     "",
     "【これまでの本文】",
@@ -437,7 +437,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.3,
+    temperature: 0.2,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -484,7 +484,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- 文字数は ${minLen}〜${maxLen} か？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ か？`,
-    `- 現実的なことをネタにしているか？`,
+    `- 現実的なネタにしているか？`,
     "- タイトルと本文の間に空行があるか？",
     // ★ ここから追記：禁止語句の厳格チェック
     "- 本文に『皮肉』『風刺』『緊張』『緩和』『伏線』『比喩』という語を**一切含めない**こと（英字・同義語例: irony, satire, tension, release, foreshadowing, metaphor も不可）。該当語がある場合は**別表現に必ず置換**してから出力すること。",
@@ -512,7 +512,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.3,
+    temperature: 0.2,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -584,7 +584,7 @@ export default async function handler(req, res) {
     const payload = {
       model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
       messages,
-      temperature: 0.3,
+      temperature: 0.2,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
