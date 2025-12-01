@@ -1,4 +1,3 @@
-
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
 // 必須: XAI_API_KEY
@@ -75,22 +74,34 @@ async function checkCredit(user_id) {
   return { ok: used < FREE_QUOTA || paid > 0, row };
 }
 
-/** 生成成功後：ここで初めて消費（無料→有料の順） */
+/** 生成成功後：ここで初めて消費（無料→有料の順）
+ *  エラーが起きても絶対に throw せず、クレジット減少が原因でレスポンスが失敗しないようにする
+ */
 async function consumeAfterSuccess(user_id) {
   if (!hasSupabase || !user_id) return { consumed: null };
-  const row = await getUsageRow(user_id);
-  const used = row.output_count ?? 0;
-  const paid = row.paid_credits ?? 0;
+  try {
+    const row = await getUsageRow(user_id);
+    const used = row.output_count ?? 0;
+    const paid = row.paid_credits ?? 0;
 
-  if (used < FREE_QUOTA) {
-    await setUsageRow(user_id, { output_count: used + 1, paid_credits: paid });
-    return { consumed: "free" };
+    if (used < FREE_QUOTA) {
+      await setUsageRow(user_id, { output_count: used + 1, paid_credits: paid });
+      return { consumed: "free" };
+    }
+    if (paid > 0) {
+      await setUsageRow(user_id, { output_count: used + 1, paid_credits: paid - 1 });
+      return { consumed: "paid" };
+    }
+    return { consumed: null };
+  } catch (e) {
+    // ここでエラーになっても「生成自体は成功している」のに 500 を返さないようにする。
+    // また、この catch の中では setUsageRow が失敗した場合もそれ以上クレジットを減らさない。
+    console.warn(
+      "[supabase] consumeAfterSuccess failed, credits NOT decremented:",
+      e?.message || e
+    );
+    return { consumed: null, error: e?.message || String(e) };
   }
-  if (paid > 0) {
-    await setUsageRow(user_id, { output_count: used + 1, paid_credits: paid - 1 });
-    return { consumed: "paid" };
-  }
-  return { consumed: null };
 }
 
 /* === ★ 追加：購入反映ユーティリティ（credit_100 のみ 100 回付与） === */
@@ -359,6 +370,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 出力前に **自己チェック** を行い、未使用の技法がある場合は **本文を追記** して満たしてから出力を終えること。",
     "- 技法名や“この技法を使う”といったメタ表現は本文に **絶対に書かない**。",
     "- 自己検証時は《TAG:要素名》の**一時タグ法**を内部で用いてよいが、**最終出力では必ず全削除**しタグを残さないこと。",
+    "- ここで列挙される技法は、フロント画面でユーザーが選択した「選択された技法」である。これらを一つ残らず、ボケ・ツッコミの具体的な掛け合いの中で必ず使うこと。",
     guideline || "",
     "",
     "■分量・形式の厳守",
@@ -370,6 +382,13 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 「比喩」「皮肉」「風刺」と直接本文に書かない。",
     "- 「緊張感のある状態」とそれが「緩和」する状態を必ず作る。",
     "- 「採用する技法」をしっかり使う。",
+    "",
+    "■自己改稿プロセス（60点→100点）",
+    "- まず頭の中で、与えられた条件をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
+    "- 次に、その60点の台本を観客目線で自己採点し、「どこを直せばもっと笑えるか」「どの技法が弱いか」を具体的に見直す。",
+    "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
+    "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
+    "",
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
     "- タイトルと本文の間には必ず空行を1つ入れる",
@@ -378,11 +397,15 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 現実的なことをネタにする。現実から飛躍したことを言わない。",
     "- 登場人物の個性を反映する。",
     "- 観客がしっかり笑える表現にする。",
+    "- ボケやツッコミには、少しヒヤヒヤする要素や意外性があっても、暴力・差別・性的な危険さには踏み込まず、最終的に安心感や納得感のあるオチになるようにする。",
+    "- フロントで選択された技法が、ボケとツッコミの自然な掛け合いの中で伝わるように使われているかを常に意識する。",
     "",
     // ▼▼▼ 最終チェックリスト ▼▼▼
     `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
     `- すべての「採用する技法」を1回以上使ったか？`,
+    `- フロントで選択された技法（採用する技法）が、ボケとツッコミの掛け合いの中で具体的な台詞・展開として使われているか？`,
     `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
+    `- ボケやツッコミの表現は、多少ヒヤヒヤしても危険ではなく、最終的に安心感や納得感につながっているか？`,
     `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
     `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
     `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
@@ -477,7 +500,9 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const checklist = [
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
     `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
+    `- フロントで選択された技法（採用する技法）が、ボケとツッコミの掛け合いの中で具体的な台詞・展開として使われているか？`,
     `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
+    `- ボケやツッコミの表現は、多少ヒヤヒヤしても危険ではなく、最終的に安心感や納得感につながっているか？`,
     `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
     `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
     `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
@@ -504,7 +529,11 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   ].join("\n");
 
   const messages = [
-    { role: "system", content: "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。一時タグは出力に残さないこと。" },
+    {
+      role: "system",
+      content:
+        "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。一時タグは出力に残さないこと。",
+    },
     { role: "user", content: verifyPrompt },
   ];
 
@@ -552,7 +581,7 @@ export default async function handler(req, res) {
 
     const { theme, genre, characters, length, boke, tsukkomi, general, user_id } = req.body || {};
 
-    // 生成前：残高チェックのみ（消費なし）
+       // 生成前：残高チェックのみ（消費なし）
     const gate = await checkCredit(user_id);
     if (!gate.ok) {
       const row = gate.row || { output_count: 0, paid_credits: 0 };
@@ -563,7 +592,15 @@ export default async function handler(req, res) {
       });
     }
 
-    const { prompt, techniquesForMeta, structureMeta, maxLen, minLen, tsukkomiName, targetLen } = buildPrompt({
+    const {
+      prompt,
+      techniquesForMeta,
+      structureMeta,
+      maxLen,
+      minLen,
+      tsukkomiName,
+      targetLen,
+    } = buildPrompt({
       theme,
       genre,
       characters,
@@ -578,7 +615,11 @@ export default async function handler(req, res) {
     // モデル呼び出し（xAIは max_output_tokens を参照）★余裕UP
     const approxMaxTok = Math.min(8192, Math.ceil(Math.max(maxLen * 2, 3500) * 3));
     const messages = [
-      { role: "system", content: "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。" },
+      {
+        role: "system",
+        content:
+          "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。",
+      },
       { role: "user", content: prompt },
     ];
     const payload = {
@@ -661,7 +702,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Empty output" });
     }
 
-    // 成功：ここで初めて消費
+    // 成功：ここで初めて消費（consumeAfterSuccess は内部でエラーを握りつぶし、絶対に throw しない）
     await consumeAfterSuccess(user_id);
 
     // 残量取得
@@ -698,6 +739,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Server Error", detail: e });
   }
 }
-
-
-
