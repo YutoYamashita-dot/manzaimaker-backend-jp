@@ -397,6 +397,12 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
   const prompt = [
     "あなたは実力派の漫才師コンビです。「採用する技法」を必ず使い、日本語の漫才台本を作成してください。",
     "",
+    "■指定条件の絶対遵守(重要)",
+    `- 【題材：${safeTheme}】を必ず中心的な話題に据えること。${safeTheme}以外の話をメインにしないこと。`,
+    `- 【ジャンル：${safeGenre}】に沿った雰囲気・内容にすること。`,
+    `- 【登場人物：${charDesc}】を必ず使用し、指定された性格・口調を厳守すること。`,
+    `- 【文字数：${minLen}文字以上】を絶対に下回らないこと。もし話が早く終わりそうなら、ボケの数を増やす、展開を一つ追加するなどして、必ず規定の長さを満たすこと。`,
+    "",
     `■題材: ${safeTheme}`,
     `■ジャンル: ${safeGenre}`,
     `■登場人物: ${charDesc}`,
@@ -431,8 +437,8 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 「出力するネタ」が最新の情報に基づいているかインターネットを検索し参照する。",
     "",
     "■自己改稿プロセス（60点→100点）",
-    "- まず頭の中で、与えられた条件をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
-    "- 次に、その60点の台本を観客目線で自己採点し、「どこを直せばもっと笑えるか」「どの技法が弱いか」を具体的に見直す。",
+    "- まず頭の中で、与えられた条件（題材、ジャンル、登場人物、文字数）をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
+    "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見直す。",
     "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
     "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
     "",
@@ -455,6 +461,9 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "",
     // ▼▼▼ 最終チェックリスト ▼▼▼
     `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
+    `- 指定された題材「${safeTheme}」をメインに据えているか？`,
+    `- 指定されたジャンル「${safeGenre}」に合っているか？`,
+    `- 指定された登場人物「${charDesc}」を使用しているか？`,
     `- すべての「採用する技法」を1回以上使ったか？`,
     `- フロントで選択された技法（採用する技法）が、ボケとツッコミの掛け合いの中で具体的な台詞・展開として使われているか？`,
     `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
@@ -470,7 +479,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
 
-  return { prompt, techniquesForMeta, structureMeta, maxLen, minLen, tsukkomiName, targetLen };
+  return { prompt, techniquesForMeta, structureMeta, maxLen, minLen, tsukkomiName, targetLen, safeTheme, safeGenre, charDesc };
 }
 
 /* ===== 指定文字数に30字以上足りない場合に本文を追記する ===== */
@@ -643,10 +652,12 @@ function normalizeError(err) {
 /* =========================
 5.5) 本文の自己検証＆自動修正パス（不足技法があれば追記/修正）
 ========================= */
-async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [], minLen, maxLen, tsukkomiName }) {
+async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [], minLen, maxLen, tsukkomiName, theme, genre, charDesc }) {
   const checklist = [
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
-    "- 選んだ「題材」についてしっかり話題にしているか？",
+    `- 指定された題材「${theme}」についてしっかり話題にしているか？（もし逸れている場合は${theme}中心に書き直す）`,
+    `- 指定されたジャンル「${genre}」に沿っているか？`,
+    `- 指定された登場人物「${charDesc}」の性格設定を守っているか？`,
     `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
     `- フロントで選択された技法（採用する技法）が、ボケとツッコミの掛け合いの中で具体的な台詞・展開として使われているか？`,
     `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
@@ -654,7 +665,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
     `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
     `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
-    `- 文字数は必ず ${minLen}文字以上 あるか？（不足している場合は加筆修正して伸ばすこと）`, // ★文字数チェック強化
+    `- 文字数は必ず ${minLen}文字以上 あるか？（不足している場合は加筆修正して伸ばすこと。${minLen}文字未満は許可されない）`, // ★文字数チェック強化
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
     `- 現実的なネタにしているか？`,
@@ -785,6 +796,9 @@ export default async function handler(req, res) {
       minLen,
       tsukkomiName,
       targetLen,
+      safeTheme, // ★追加：検証用に受け取る
+      safeGenre, // ★追加
+      charDesc   // ★追加
     } = buildPrompt({
       theme,
       genre,
@@ -869,6 +883,9 @@ export default async function handler(req, res) {
         minLen,
         maxLen,
         tsukkomiName,
+        theme: safeTheme, // ★検証用に渡す
+        genre: safeGenre, // ★検証用に渡す
+        charDesc: charDesc // ★検証用に渡す
       });
     } catch (e) {
       console.warn("[self-verify] failed:", e?.message || e);
