@@ -529,7 +529,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.4,
+    temperature: 0.7,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -569,7 +569,7 @@ const client = {
 
         const model = payload.model || DEFAULT_MODEL;
         const messages = payload.messages || [];
-        const temperature = payload.temperature ?? 0.4;
+        const temperature = payload.temperature ?? 0.7;
         const maxOut = payload.max_output_tokens ?? payload.max_tokens;
 
         // OpenAI形式 messages → Gemini contents へ変換
@@ -705,7 +705,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.4,
+    temperature: 0.7,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -742,7 +742,7 @@ async function generateTitleForBody({ client, model, body }) {
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.4,
+    temperature: 0.7,
     max_output_tokens: 100,
     max_tokens: 100,
   });
@@ -824,7 +824,7 @@ export default async function handler(req, res) {
     const payload = {
       model: DEFAULT_MODEL,
       messages,
-      temperature: 0.4,
+      temperature: 0.7,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
