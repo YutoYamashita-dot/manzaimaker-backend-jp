@@ -1,7 +1,7 @@
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
-// 必須: XAI_API_KEY
-// 任意: XAI_MODEL
+// 必須: XAI_API_KEY / DEEPSEEK_API_KEY
+// 任意: XAI_MODEL / DEEPSEEK_MODEL
 // 追加: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（ある場合、user_id の回数/クレジットを保存）
 
 export const config = { runtime: "nodejs" };
@@ -188,13 +188,25 @@ function enforceCharLimit(text, minLen, maxLen, allowOverflow = false) {
 }
 
 /* =========================
-3.5) 最終行の強制付与
+3.5) 最終行の強制付与（修正：重複防止を強化）
 ========================= */
 function ensureTsukkomiOutro(text, tsukkomiName = "B") {
   const outro = `${tsukkomiName}: もういいよ！`;
   if (!text) return outro;
-  if (/もういいよ！\s*$/.test(text)) return text;
-  return text.replace(/\s*$/, "") + "\n" + outro;
+  
+  let t = text.trim();
+  
+  // 文末にすでに「もういいよ（！）」がある場合、AIが書いたものと
+  // システムが付与するものが重複しないよう、末尾の「もういいよ」系を一度完全に削除する。
+  // 正規表現：行頭or改行 + (任意の名前: ) + もういいよ + 感嘆符等 + 文末
+  const endPattern = /(?:^|\n)(?:[^:\n]+:\s*)?もういいよ[！!]*\s*$/;
+  
+  // 念のためループで削除（稀に改行を挟んで2つある場合などの対策）
+  while (endPattern.test(t)) {
+    t = t.replace(endPattern, "").trim();
+  }
+  
+  return t + "\n" + outro;
 }
 
 /* 行頭の「名前：/名前:」を「名前: 」に正規化 */
@@ -230,7 +242,9 @@ function ensureBlankLineBetweenTurns(text) {
 function splitTitleAndBody(s) {
   if (!s) return { title: "", body: "" };
   const parts = s.split(/\r?\n\r?\n/, 2);
-  const title = (parts[0] || "").trim().replace(/^【|】$/g, "");
+  const rawTitle = (parts[0] || "").trim();
+  // 先頭の「【」と最初の「】」を削除しておく
+  const title = rawTitle.replace(/^【/, "").replace(/】/, "");
   const body = (parts[1] ?? s).trim();
   return { title, body };
 }
@@ -239,8 +253,11 @@ function splitTitleAndBody(s) {
 function normalizeTitleString(str = "") {
   return String(str)
     .trim()
-    .replace(/^【|】$/g, "")
-    .replace(/^(タイトル|Title)\s*[:：]\s*/i, "")
+    // 先頭「【」と最初の「】」を除去
+    .replace(/^【/, "")
+    .replace(/】/, "")
+    // 「タイトル」「Title」ラベルを除去（末尾に「】」がくっついていても消す）
+    .replace(/^(タイトル|Title)\s*[:：】]?\s*/i, "")
     .replace(/^#{1,6}\s*/, "")
     .replace(/\s+/g, " ");
 }
@@ -315,7 +332,7 @@ function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
 }
 
 /* =========================
-5) プロンプト生成（±10%バンド厳守）
+5) プロンプト生成（±10%バンド厳守 → 修正：指定量を下限とする）
 ========================= */
 function buildPrompt({ theme, genre, characters, length, selected }) {
   const safeTheme = theme?.toString().trim() || "身近な題材";
@@ -326,9 +343,35 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     .filter(Boolean)
     .slice(0, 4);
 
+  // ★性格の自動付与（名前文字列に「（」が含まれていない場合のみ付与）
+  // 例: "田中, 佐藤" → "田中（論理的）, 佐藤（アホ）"
+  const hasPersonality = names.some(n => n.includes("(") || n.includes("（"));
+  let charDesc = names.join("、");
+  if (!hasPersonality && names.length >= 2) {
+    const personalities = [
+      ["論理的すぎて面倒くさい人", "感情的でアホな人"],
+      ["自信過剰な勘違い野郎", "冷めたリアリスト"],
+      ["言葉使いが丁寧すぎるサイコパス", "普通の常識人"],
+      ["滑舌が悪い熱血漢", "聞き取るのがうまい冷静な人"]
+    ];
+    // ランダムで1セット選ぶ
+    const [p1, p2] = personalities[Math.floor(Math.random() * personalities.length)];
+    // names配列自体は弄らず、プロンプトに渡す文字列だけ加工
+    if (names[0] && names[1]) {
+      charDesc = `${names[0]}（${p1}）、${names[1]}（${p2}）`;
+      // 3人目以降がいればそのまま結合
+      if (names.length > 2) {
+        charDesc += "、" + names.slice(2).join("、");
+      }
+    }
+  }
+
   const targetLen = Math.min(Number(length) || 350, 2000);
-  const minLen = Math.max(100, Math.floor(targetLen * 0.9));
-  const maxLen = Math.ceil(targetLen * 1.1);
+  
+  // ★修正: 指定文字数を「下限」にする（ユーザーは指定量以上を期待するため）
+  const minLen = targetLen;
+  const maxLen = Math.ceil(targetLen * 1.25); // 上限は少し余裕を持たせる
+  
   const minLines = Math.max(12, Math.ceil(minLen / 35));
 
   const hasNewSelection =
@@ -356,13 +399,15 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "",
     `■題材: ${safeTheme}`,
     `■ジャンル: ${safeGenre}`,
-    `■登場人物: ${names.join("、")}`,
-    `■目標文字数: ${minLen}〜${maxLen}文字（必ずこの範囲内に収める）`,
+    `■登場人物: ${charDesc}`,
+    `■目標文字数: ${minLen}文字以上 ${maxLen}文字以下（この範囲を絶対に守ること。短すぎる場合は失格）`,
     "",
     "■必須の構成",
     "- 1) フリ（導入）：ボケやオチを成立させるための「前提」「状況設定」「観客との共通認識づくり」を設定する。",
     "- 2) 伏線回収：フリ（導入）の段階で提示された情報・言葉・構図を、後半で再登場させて「意外な形で再接続」させる。",
     "- 3) 最後は明確な“オチ”：全てのズレ・やり取りを収束させる表現、言葉を使う。",
+    // ★追加要素2：ボケのインフレ
+    "- 4) 「ボケのエスカレーション」：同じテーマでボケを繰り返す際、必ず前回よりも「極端」で「ありえない」ボケに進化させること（徐々に異常性を高める）。",
     "",
     // ★ 強化：「採用する技法」を“必ず”使う（未使用は不可）
     "■必ず使用する技法（名称を本文に書かない）",
@@ -401,6 +446,12 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- 観客がしっかり笑える表現にする。",
     "- ボケやツッコミには、少しヒヤヒヤする要素や意外性があっても、暴力・差別・性的な危険さには踏み込まず、最終的に安心感や納得感のあるオチになるようにする。",
     "- フロントで選択された技法が、ボケとツッコミの自然な掛け合いの中で伝わるように使われているかを常に意識する。",
+    // ★追加要素1：具体性の強制
+    "- 【超重要】「固有名詞」や「具体的な数字」を必ず使うこと。「美味しい店」ではなく「サイゼリヤ」、「高い」ではなく「35年ローン」など、映像が浮かぶ具体的な言葉選びをすること。",
+    "- 抽象的な表現（あれ、それ、あること、面白いこと）は禁止。",
+    // ★追加要素3（性格）の反映
+    "- 各キャラクターは、設定された「性格」に基づいた口調・思考回路を徹底すること。",
+    "- 性格の不一致から生まれる「話の通じなさ」を笑いにすること。",
     "",
     // ▼▼▼ 最終チェックリスト ▼▼▼
     `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
@@ -411,9 +462,9 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
     `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
     `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
-    `- 文字数は ${minLen}〜${maxLen} か？`,
+    `- 文字数は必ず ${minLen}文字以上 あるか？`,
     `- 各台詞は「名前: セリフ」形式か？`,
-    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
     `- タイトルと本文の間に空行があるか？`,
     `- 現実的なネタにしているか？`,
     `→ 1つでもNoなら、即座に修正してから出力。`,
@@ -445,9 +496,15 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？",
     "- 文字数は \\${minLen}〜\\${maxLen} か？",
     "− 各台詞は「名前: セリフ」形式か？",
-    "- 最後は ${tsukkomiName}: もういいよ！ か？",
+    "- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？",
     "- タイトルと本文の間に空行があるか？",
     "- 現実的なネタにしているか？",
+    // ★追加要素1：具体性の強制
+    "- 【超重要】「固有名詞」や「具体的な数字」を必ず使うこと。「美味しい店」ではなく「サイゼリヤ」、「高い」ではなく「35年ローン」など、映像が浮かぶ具体的な言葉選びをすること。",
+    "- 抽象的な表現（あれ、それ、あること、面白いこと）は禁止。",
+    // ★追加要素3（性格）の反映
+    "- 各キャラクターは、設定された「性格」に基づいた口調・思考回路を徹底すること。",
+    "- 性格の不一致から生まれる「話の通じなさ」を笑いにすること。",
     "→ 1つでもNoなら、即座に修正してから出力。",
     "",
     "【これまでの本文】",
@@ -463,7 +520,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.2,
+    temperature: 0.7,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -476,12 +533,99 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
 }
 
 /* =========================
-6) Grok (xAI) 呼び出し
+6) DeepSeek 呼び出し → Gemini 2.5 Flash ラッパー
 ========================= */
-const client = new OpenAI({
-  apiKey: process.env.XAI_API_KEY,
-  baseURL: "https://api.x.ai/v1",
-});
+
+// ★ GEMINI 用の設定
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
+
+// デフォルトモデル（環境変数があればそれを優先）
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+// OpenAI 互換の client.chat.completions.create をエミュレートするクライアント
+const client = {
+  chat: {
+    completions: {
+      /**
+       * @param {object} payload - { model, messages, temperature, max_output_tokens, max_tokens, ... }
+       * @returns {{choices: [{message: {role: string, content: string}}]}}
+       */
+      async create(payload) {
+        if (!GEMINI_API_KEY) {
+          const err = new Error("GEMINI_API_KEY is not set");
+          err.status = 500;
+          throw err;
+        }
+
+        const model = payload.model || DEFAULT_MODEL;
+        const messages = payload.messages || [];
+        const temperature = payload.temperature ?? 0.7;
+        const maxOut = payload.max_output_tokens ?? payload.max_tokens;
+
+        // OpenAI形式 messages → Gemini contents へ変換
+        const contents = messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        }));
+
+        const url =
+          `${GEMINI_BASE_URL}/models/` +
+          encodeURIComponent(model) +
+          `:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+        const body = {
+          contents,
+          generationConfig: {
+            temperature,
+            ...(maxOut ? { maxOutputTokens: maxOut } : {}),
+          },
+        };
+
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!resp.ok) {
+          let data;
+          try {
+            data = await resp.json();
+          } catch {
+            try {
+              const text = await resp.text();
+              data = text || undefined;
+            } catch {
+              data = undefined;
+            }
+          }
+          const err = new Error(`${resp.status} ${resp.statusText}`);
+          err.status = resp.status;
+          err.response = { data };
+          throw err;
+        }
+
+        const data = await resp.json();
+        const text =
+          data?.candidates?.[0]?.content?.parts
+            ?.map((p) => p.text || "")
+            .join("") || "";
+
+        return {
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: text,
+              },
+            },
+          ],
+        };
+      },
+    },
+  },
+};
 
 /* =========================
 失敗理由の整形
@@ -510,11 +654,16 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
     `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
     `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
-    `- 文字数は ${minLen}〜${maxLen} か？`,
+    `- 文字数は必ず ${minLen}文字以上 あるか？（不足している場合は加筆修正して伸ばすこと）`, // ★文字数チェック強化
     `- 各台詞は「名前: セリフ」形式か？`,
-    `- 最後は ${tsukkomiName}: もういいよ！ か？`,
+    `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
     `- 現実的なネタにしているか？`,
     "- タイトルと本文の間に空行があるか？",
+    // ★追加要素4：笑いの質チェック
+    "- ボケの言葉選びは一般的すぎないか？（もっと具体的な単語に直せないか？）",
+    "- ツッコミは単なる「説明」になっていないか？（ボケの異常さを嘆く、呆れる、強く否定する等の「感情」が乗っているか？）",
+    "- 台本全体を通して、読み手が『フフッ』と笑えるポイントが3箇所以上あるか？",
+    
     // ★ ここから追記：禁止語句の厳格チェック
     "- 本文に『皮肉』『風刺』『緊張』『緩和』『伏線』『比喩』という語を**一切含めない**こと（英字・同義語例: irony, satire, tension, release, foreshadowing, metaphor も不可）。該当語がある場合は**別表現に必ず置換**してから出力すること。",
     "→ 1つでもNoなら、即座に本文を修正して満たしてから出力。",
@@ -545,7 +694,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.2,
+    temperature: 0.7,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -562,13 +711,45 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
 }
 
 /* =========================
+★ 5.6) 最終本文からタイトルを再生成
+========================= */
+async function generateTitleForBody({ client, model, body }) {
+  const prompt = [
+    "以下の漫才台本の内容にふさわしい、面白くてキャッチーな「タイトル」を1つだけ考えてください。",
+    "・出力はタイトルのみ（余計な挨拶や「タイトル：」などの接頭辞は不要）",
+    "・20文字以内",
+    "",
+    "【漫才台本】",
+    body
+  ].join("\n");
+
+  const messages = [
+    { role: "system", content: "あなたは優秀な放送作家です。" },
+    { role: "user", content: prompt }
+  ];
+
+  const resp = await client.chat.completions.create({
+    model,
+    messages,
+    temperature: 0.7,
+    max_output_tokens: 100,
+    max_tokens: 100,
+  });
+
+  let title = resp?.choices?.[0]?.message?.content?.trim() || "";
+  // 掃除
+  title = title.replace(/^【|】$/g, "").replace(/^タイトル[:：]\s*/, "").replace(/\"/g, "");
+  return title;
+}
+
+/* =========================
 7) HTTP ハンドラ（後払い消費＋安定出力のための緩和）
 ========================= */
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
-      // ★ 追加：購入反映モード（credit_100 のみ 100 付与）
+    // ★ 追加：購入反映モード（credit_100 のみ 100 付与）
     // フロント側で購入後に { action: "add_credit", product_id: "credit_100", user_id } を POST する想定。
     if (req.body?.action === "add_credit") {
       try {
@@ -585,7 +766,7 @@ export default async function handler(req, res) {
 
     const { theme, genre, characters, length, boke, tsukkomi, general, user_id } = req.body || {};
 
-       // 生成前：残高チェックのみ（消費なし）
+ // 生成前：残高チェックのみ（消費なし）
     const gate = await checkCredit(user_id);
     if (!gate.ok) {
       const row = gate.row || { output_count: 0, paid_credits: 0 };
@@ -616,7 +797,7 @@ export default async function handler(req, res) {
       },
     });
 
-    // モデル呼び出し（xAIは max_output_tokens を参照）★余裕UP
+    // モデル呼び出し（Gemini ラッパー）★余裕UP
     const approxMaxTok = Math.min(8192, Math.ceil(Math.max(maxLen * 2, 3500) * 3));
     const messages = [
       {
@@ -627,9 +808,9 @@ export default async function handler(req, res) {
       { role: "user", content: prompt },
     ];
     const payload = {
-      model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+      model: DEFAULT_MODEL,
       messages,
-      temperature: 0.2,
+      temperature: 0.7,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
@@ -639,9 +820,9 @@ export default async function handler(req, res) {
       completion = await client.chat.completions.create(payload);
     } catch (err) {
       const e = normalizeError(err);
-      console.error("[xAI error]", e);
+      console.error("[deepseek error]", e); // ラベルはそのまま維持
       // 後払い方式：ここでは消費しない
-      return res.status(e.status || 500).json({ error: "xAI request failed", detail: e });
+      return res.status(e.status || 500).json({ error: "Gemini request failed", detail: e });
     }
 
     // 整形（★順序を安定化：normalize → 空行 → 落ち付与）
@@ -663,7 +844,7 @@ export default async function handler(req, res) {
       try {
         body = await generateContinuation({
           client,
-          model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+          model: DEFAULT_MODEL,
           baseBody: body,
           remainingChars: deficit,
           tsukkomiName,
@@ -678,13 +859,11 @@ export default async function handler(req, res) {
     }
 
     // ★ 自己検証＆自動修正（採用する技法の担保）
-    // techniquesForMeta = Boke/Tsukkomi のラベル。構成系は structureMeta に入っているが、
-    // 厳密には「採用する技法」を担保したいので、ここでは techniquesForMeta を主対象にする。
     const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
     try {
       body = await selfVerifyAndCorrectBody({
         client,
-        model: process.env.XAI_MODEL || "grok-4-fast-reasoning",
+        model: DEFAULT_MODEL,
         body,
         requiredTechs: requiredForCheck,
         minLen,
@@ -698,6 +877,18 @@ export default async function handler(req, res) {
 
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
+
+    // ★ タイトル再生成（本文の確定後に、内容と整合させるため）
+    if (typeof body === "string" && body.trim().length > 0) {
+        try {
+            const newTitle = await generateTitleForBody({ client, model: DEFAULT_MODEL, body });
+            if (newTitle && newTitle.length > 0) {
+                title = newTitle;
+            }
+        } catch (e) {
+            console.warn("[title-gen] failed:", e?.message || e);
+        }
+    }
 
     // 成功判定：★本文非空のみ（語尾揺れで落とさない）
     const success = typeof body === "string" && body.trim().length > 0;
