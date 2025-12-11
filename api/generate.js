@@ -398,7 +398,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "あなたは実力派の漫才師コンビです。「採用する技法」を必ず使い、日本語の漫才台本を作成してください。",
     "",
     "■指定条件の絶対遵守(重要)",
-    `- 【題材：${safeTheme}】を必ず中心的な話題に据えること。${safeTheme}以外の話をメインにしないこと。`,
+    `- 【題材：${safeTheme}】を漫才の「核」とし、最初から最後までこの話題で貫くこと。単に名前を出すだけでなく、${safeTheme}に関連する具体的なエピソード、あるある、偏見などを盛り込み、${safeTheme}以外の話をメインにしないこと。`,
     `- 【ジャンル：${safeGenre}】に沿った雰囲気・内容にすること。`,
     `- 【登場人物：${charDesc}】を必ず使用し、指定された性格・口調を厳守すること。`,
     `- 【文字数：${minLen}文字以上】を絶対に下回らないこと。もし話が早く終わりそうなら、ボケの数を増やす、展開を一つ追加するなどして、必ず規定の長さを満たすこと。`,
@@ -409,7 +409,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `■目標文字数: ${minLen}文字以上 ${maxLen}文字以下（この範囲を絶対に守ること。短すぎる場合は失格）`,
     "",
     "■必須の構成",
-    "- 1) フリ（導入）：ボケやオチを成立させるための「前提」「状況設定」「観客との共通認識づくり」を設定する。",
+    `- 1) フリ（導入）：冒頭ですぐに「${safeTheme}」について触れ、ボケやオチを成立させるための前提・状況設定を行う。`,
     "- 2) 伏線回収：フリ（導入）の段階で提示された情報・言葉・構図を、後半で再登場させて「意外な形で再接続」させる。",
     "- 3) 最後は明確な“オチ”：全てのズレ・やり取りを収束させる表現、言葉を使う。",
     // ★追加要素2：ボケのインフレ
@@ -461,7 +461,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "",
     // ▼▼▼ 最終チェックリスト ▼▼▼
     `■最終出力前に必ずこのチェックリストを頭の中で確認：`,
-    `- 指定された題材「${safeTheme}」をメインに据えているか？`,
+    `- 指定された題材「${safeTheme}」が、漫才全体の中心テーマになっているか？（単語が出るだけでなく、内容そのものが${safeTheme}の話になっているか？ 別の話題にすり替わっていないか？）`,
     `- 指定されたジャンル「${safeGenre}」に合っているか？`,
     `- 指定された登場人物「${charDesc}」を使用しているか？`,
     `- すべての「採用する技法」を1回以上使ったか？`,
@@ -497,7 +497,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "",
     // ▼▼▼ 最終チェックリスト（続き生成にも適用） ▼▼▼
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
-    "- 選んだ「題材」についてしっかり話題にしているか？",
+    "- これまでの文脈にある『題材』から逸れずに展開しているか？",
     "- すべての「採用する技法」を1回以上使ったか？",
     "- 「意外性」があるが「納得感」のある笑える表現を使っているか？",
     "- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？",
@@ -529,7 +529,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.7,
+    temperature: 0.4,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -569,7 +569,7 @@ const client = {
 
         const model = payload.model || DEFAULT_MODEL;
         const messages = payload.messages || [];
-        const temperature = payload.temperature ?? 0.7;
+        const temperature = payload.temperature ?? 0.4;
         const maxOut = payload.max_output_tokens ?? payload.max_tokens;
 
         // OpenAI形式 messages → Gemini contents へ変換
@@ -655,7 +655,7 @@ function normalizeError(err) {
 async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [], minLen, maxLen, tsukkomiName, theme, genre, charDesc }) {
   const checklist = [
     "■最終出力前に必ずこのチェックリストを頭の中で確認：",
-    `- 指定された題材「${theme}」についてしっかり話題にしているか？（もし逸れている場合は${theme}中心に書き直す）`,
+    `- 指定された題材「${theme}」が、漫才全体の中心テーマになっているか？（単語が出るだけでなく、内容そのものが${theme}の話になっているか？ 別の話題にすり替わっていないか？ 逸れている場合は全文書き直してでも${theme}に戻すこと）`,
     `- 指定されたジャンル「${genre}」に沿っているか？`,
     `- 指定された登場人物「${charDesc}」の性格設定を守っているか？`,
     `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
@@ -705,7 +705,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.7,
+    temperature: 0.4,
     max_output_tokens: approxTok,
     max_tokens: approxTok,
   });
@@ -742,7 +742,7 @@ async function generateTitleForBody({ client, model, body }) {
   const resp = await client.chat.completions.create({
     model,
     messages,
-    temperature: 0.7,
+    temperature: 0.4,
     max_output_tokens: 100,
     max_tokens: 100,
   });
@@ -824,7 +824,7 @@ export default async function handler(req, res) {
     const payload = {
       model: DEFAULT_MODEL,
       messages,
-      temperature: 0.7,
+      temperature: 0.4,
       max_output_tokens: approxMaxTok,
       max_tokens: approxMaxTok,
     };
