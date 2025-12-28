@@ -550,7 +550,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
 
 // デフォルトモデル（環境変数があればそれを優先）
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
 
 // OpenAI 互換の client.chat.completions.create をエミュレートするクライアント
 const client = {
