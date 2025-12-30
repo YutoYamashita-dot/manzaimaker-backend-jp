@@ -351,7 +351,6 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     const personalities = [
       ["論理的すぎて面倒くさい人", "感情的でアホな人"],
       ["自信過剰な勘違い野郎", "冷めたリアリスト"],
-      ["言葉使いが丁寧すぎるサイコパス", "普通の常識人"],
       ["滑舌が悪い熱血漢", "聞き取るのがうまい冷静な人"]
     ];
     // ランダムで1セット選ぶ
@@ -669,7 +668,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
     `- 現実的なネタにしているか？`,
-    "- タイトルと本文の間に空行があるか？",
+    "- タイトルと本文の間には必ず空行があるか？",
     // ★追加要素4：笑いの質チェック
     "- ボケの言葉選びは一般的すぎないか？（もっと具体的な単語に直せないか？）",
     "- ツッコミは単なる「説明」になっていないか？（ボケの異常さを嘆く、呆れる、強く否定する等の「感情」が乗っているか？）",
@@ -932,6 +931,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       title: title || "（タイトル未設定）",
+      body: body || "（ネタの生成に失敗しました）",
       text: body || "（ネタの生成に失敗しました）",
       meta: {
         structure: structureMeta,
