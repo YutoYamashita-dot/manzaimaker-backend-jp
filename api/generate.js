@@ -473,7 +473,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- 文字数は必ず ${minLen}文字以上 あるか？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
-    `- タイトルと本文の間に空行があるか？`,
+    `- タイトルと本文の間には空行があるか？`,
     `- 現実的なネタにしているか？`,
     `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
@@ -505,7 +505,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "- 文字数は \\${minLen}〜\\${maxLen} か？",
     "− 各台詞は「名前: セリフ」形式か？",
     "- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？",
-    "- タイトルと本文の間に空行があるか？",
+    "- タイトルと本文の間には空行があるか？",
     "- 現実的なネタにしているか？",
     // ★追加要素1：具体性の強制
     "- 【超重要】「固有名詞」や「具体的な数字」を必ず使うこと。「美味しい店」ではなく「サイゼリヤ」、「高い」ではなく「35年ローン」など、映像が浮かぶ具体的な言葉選びをすること。",
@@ -929,19 +929,30 @@ export default async function handler(req, res) {
       }
     }
 
+    // ★ iPhone/SwiftのJSONDecoder対策：
+    // AIが生成した文字列に混入する可能性がある特殊なUnicode（行区切り文字など）を、
+    // 標準的な改行コードに置換してから送信する。
+    const sanitizedBody = body
+      .replace(/[\u2028\u2029]/g, "\n")
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ""); // 制御文字も除去
+
+    // レスポンスヘッダーに明示的に charset=utf-8 を指定
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+
     return res.status(200).json({
       title: title || "（タイトル未設定）",
-      body: body || "（ネタの生成に失敗しました）",
-      text: body || "（ネタの生成に失敗しました）",
+      body: sanitizedBody || "（ネタの生成に失敗しました）",
+      text: sanitizedBody || "（ネタの生成に失敗しました）",
+      content: sanitizedBody || "（ネタの生成に失敗しました）", // 念のため3種類のキー名で返す
       meta: {
         structure: structureMeta,
         techniques: techniquesForMeta,
-        usage_count: metaUsage,
-        paid_credits: metaCredits,
-        target_length: targetLen,
-        min_length: minLen,
-        max_length: maxLen,
-        actual_length: body.length,
+        usage_count: metaUsage ? Math.floor(metaUsage) : 0,
+        paid_credits: metaCredits ? Math.floor(metaCredits) : 0,
+        target_length: targetLen ? Math.floor(targetLen) : 0,
+        min_length: minLen ? Math.floor(minLen) : 0,
+        max_length: maxLen ? Math.floor(maxLen) : 0,
+        actual_length: sanitizedBody.length,
       },
     });
   } catch (err) {
