@@ -68,15 +68,13 @@ function formatScript(rawText, names) {
   let lines = rawText.split("\n").map(l => l.trim()).filter(l => l !== "");
   let title = "無題の漫才";
 
-  // タイトル行の抽出と除去
+  // タイトル行の抽出と除去（強化版）
   if (lines[0]) {
     const rawTitle = lines[0];
     const cleanTitle = rawTitle
-      .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "")
-      .replace(/^[\#\s]+/, "")
-      .replace(/^【|】$/g, "")
-      .replace(/^「|」$/g, "")
-      .replace(/^"|"$/g, "")
+      .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "") // "タイトル:"を除去
+      .replace(/[\[\]【】「」""]/g, "") // 【】、「」、[]、"" を除去
+      .replace(/^[\#\s]+/, "") // Markdownの#を除去
       .trim();
     
     // 1行目が「名前: セリフ」の形式でない場合のみタイトルとみなす
@@ -86,13 +84,17 @@ function formatScript(rawText, names) {
     }
   }
 
-  // 本文成形：修正箇所（join("\n\n") -> join("\n")）
-  // アプリ側で \n が「1つの段落空き」として扱われる場合に対応
-  let bodyText = lines.join("\n").replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
+  // 本文成形：修正箇所
+  // 1. join("\n") で結合
+  // 2. replace(/\n{2,}/g, "\n") で連続する改行を強制的に1つにする
+  let bodyText = lines.join("\n").replace(/\n{2,}/g, "\n");
+
+  // 話者コロンの正規化
+  bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
   
   const outro = `${names[1] || "B"}: もういいよ！`;
   if (!bodyText.includes("もういいよ")) {
-    // 修正箇所：結合部分も \n のみに変更
+    // 結合時も \n 1つにする
     bodyText = bodyText.trim() + "\n" + outro;
   }
 
