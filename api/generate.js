@@ -8,7 +8,7 @@ const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY) : null;
 
 /* =========================
-1. 技法 定義テーブル（詳細版）
+1. 技法 定義テーブル
 ========================= */
 const BOKE_DEFS = {
   IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
@@ -45,11 +45,11 @@ export default async function handler(req, res) {
 
   const { theme, genre, characters, length, user_id, boke, tsukkomi, general } = req.body || {};
   const names = (characters || "A,B").split(/[、,]/).map(s => s.trim());
+  
+  // 文字数設定：指定された数値を「最低ライン」として扱う
   const targetLen = Number(length) || 350;
-
-  // 文字数±5%の計算（厳格な制限用）
-  const minLen = Math.floor(targetLen * 0.95);
-  const maxLen = Math.floor(targetLen * 1.05);
+  const minChar = targetLen; 
+  const maxChar = Math.ceil(targetLen * 1.5); // 上限は余裕を持たせる
 
   try {
     // 1. クレジットチェック
@@ -61,28 +61,27 @@ export default async function handler(req, res) {
       if (used >= 500 && paid <= 0) return res.status(403).json({ error: "クレジット不足" });
     }
 
-    // 2. 技法の抽出（詳細な定義文を取得）
+    // 2. 技法の抽出
     const selB = (boke || []).map(k => BOKE_DEFS[k]).filter(Boolean);
     const selT = (tsukkomi || []).map(k => TSUKKOMI_DEFS[k]).filter(Boolean);
     const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
-    
-    // プロンプト用にリスト化
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
-    // 3. プロンプト（1回で完結させる）
+    // 3. プロンプト（文字数厳守の指示を強化）
     const prompt = `プロの漫才作家として台本を日本語で作成してください。
 題材: ${theme}
 ジャンル: ${genre}
 条件:
 - 登場人物: ${names.join(", ")}
-- 【超重要】文字数: 空白や話者名を含めた全体文字数を、必ず「${minLen}字〜${maxLen}字」の範囲内に収めてください。短すぎても長すぎてもいけません。
+- 【重要】文字数: 必ず「${minChar}文字以上」書いてください。短すぎる台本は禁止です。上限は${maxChar}文字です。
 - 形式: 1行目に【タイトル】、次に本文。セリフの間には必ず「1行の空白」のみを入れてください。
+- 話者が変わるごとに空行を入れてください。
 - 最後は必ず「${names[1] || "B"}: もういいよ！」で締める。
 
 ■採用する技法（以下の技法を必ず台本内で実践してください）:
 ${techniquesText}`;
 
-    // 4. AI生成
+    // 4. AI生成 (モデルは gemini-3-flash-preview)
     const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
     const model = "gemini-3-flash-preview"; 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -93,7 +92,8 @@ ${techniquesText}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 3500 } // 少しトークン余裕を持たせる
+        // トークン数を増やして長文に対応
+        generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
       })
     });
 
@@ -107,15 +107,29 @@ ${techniquesText}`;
     if (!raw) throw new Error("AI返答が空です");
 
     // 5. 高速成形
-    // 空行を一度すべて排除してから join("\n\n") することで正確に1行の空白にする
     let lines = raw.split("\n").map(l => l.trim()).filter(l => l !== "");
+    
+    // タイトル抽出とクリーニング（強化版）
     let title = "無題の漫才";
-    if (lines[0] && (lines[0].includes("【") || !lines[0].includes(":"))) {
-      title = lines[0].replace(/[【】]|タイトル[:：]/g, "");
-      lines.shift();
+    if (lines[0]) {
+      // 1行目をタイトル候補として取得
+      const rawTitle = lines[0];
+      // 【】、""、「」、Markdown(#)、および "タイトル:" "Title" などの接頭辞を除去
+      const cleanTitle = rawTitle
+        .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "") // 先頭の「タイトル:」などを除去
+        .replace(/^[\#\s]+/, "") // Markdownの#を除去
+        .replace(/^【|】$/g, "") // 【】を除去
+        .replace(/^「|」$/g, "") // 「」を除去
+        .replace(/^"|"$/g, "")   // ""を除去
+        .trim();
+
+      if (cleanTitle) {
+        title = cleanTitle;
+        lines.shift(); // タイトル行を本文配列から削除
+      }
     }
     
-    // 話者コロンの正規化と、セリフ間1行空けの適用
+    // 本文の成形：話者コロンの正規化と、セリフ間1行空けの適用
     let bodyText = lines.join("\n\n").replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
     
     // オチの付与
@@ -124,19 +138,8 @@ ${techniquesText}`;
       bodyText = bodyText.trim() + "\n\n" + outro;
     }
 
-    // 文字数の最終的な強制トリミング（+5%の上限を超過した場合のみカット）
-    if (bodyText.length > maxLen) {
-        // オチの分を確保してカット
-        let tempText = bodyText.substring(0, maxLen - outro.length - 10);
-        // キリの良い文末（。！？）を探す
-        const lastPunc = Math.max(tempText.lastIndexOf("。"), tempText.lastIndexOf("！"), tempText.lastIndexOf("？"));
-        if (lastPunc > targetLen * 0.5) { // ある程度長さがあればそこで切る
-            bodyText = tempText.substring(0, lastPunc + 1) + "\n\n" + outro;
-        } else {
-            // 文末が見つからない場合は強制的に切ってオチをつける
-            bodyText = tempText + "…\n\n" + outro;
-        }
-    }
+    // ★以前の「強制トリミング処理」は削除しました。
+    // プロンプトで指定した文字数を尊重し、AIが出力した全量を返します。
     
     // 特殊文字排除（iPhoneでの解析エラー防止）
     const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
@@ -153,7 +156,7 @@ ${techniquesText}`;
     // 7. iPhone (Swift/Codable) 向けレスポンス
     return res.status(200).json({
       status: "success",
-      title: String(title.trim()),
+      title: String(title),
       body: cleanBody,
       text: cleanBody,
       content: cleanBody,
