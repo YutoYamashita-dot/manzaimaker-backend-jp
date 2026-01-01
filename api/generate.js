@@ -37,19 +37,85 @@ const GENERAL_DEFS = {
   TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。",
 };
 
+// 共通AI呼び出し関数（エラーハンドリング付き）
+async function callGemini(prompt, apiKey) {
+  const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
+  const model = "gemini-3-flash-preview"; 
+  const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ 
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
+    })
+  });
+
+  if (!resp.ok) {
+    const errData = await resp.json();
+    throw new Error(`Gemini API Error: ${JSON.stringify(errData)}`);
+  }
+
+  const data = await resp.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if (!text) throw new Error("AI返答が空です");
+  return text;
+}
+
+// テキスト整形関数
+function formatScript(rawText, names) {
+  let lines = rawText.split("\n").map(l => l.trim()).filter(l => l !== "");
+  let title = "無題の漫才";
+
+  // タイトル行の抽出と除去
+  if (lines[0]) {
+    const rawTitle = lines[0];
+    const cleanTitle = rawTitle
+      .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "")
+      .replace(/^[\#\s]+/, "")
+      .replace(/^【|】$/g, "")
+      .replace(/^「|」$/g, "")
+      .replace(/^"|"$/g, "")
+      .trim();
+    
+    // 1行目が「名前: セリフ」の形式でない場合のみタイトルとみなす
+    if (cleanTitle && !rawTitle.includes(":")) {
+      title = cleanTitle;
+      lines.shift();
+    }
+  }
+
+  // 本文成形：修正箇所（join("\n\n") -> join("\n")）
+  // アプリ側で \n が「1つの段落空き」として扱われる場合に対応
+  let bodyText = lines.join("\n").replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
+  
+  const outro = `${names[1] || "B"}: もういいよ！`;
+  if (!bodyText.includes("もういいよ")) {
+    // 修正箇所：結合部分も \n のみに変更
+    bodyText = bodyText.trim() + "\n" + outro;
+  }
+
+  // 特殊文字排除
+  const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
+  
+  return { title, cleanBody };
+}
+
 export default async function handler(req, res) {
-  // iPhoneのデコードエラーを防ぐため、常にJSONで返す設定
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 
   if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
   const { theme, genre, characters, length, user_id, boke, tsukkomi, general } = req.body || {};
   const names = (characters || "A,B").split(/[、,]/).map(s => s.trim());
-  
-  // 文字数設定：指定された数値を「最低ライン」として扱う
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  // 目標文字数設定
   const targetLen = Number(length) || 350;
-  const minChar = targetLen; 
-  const maxChar = Math.ceil(targetLen * 1.5); // 上限は余裕を持たせる
+  // ★上下10%の厳格な範囲設定
+  const minLimit = Math.floor(targetLen * 0.9);
+  const maxLimit = Math.floor(targetLen * 1.1);
 
   try {
     // 1. クレジットチェック
@@ -61,88 +127,67 @@ export default async function handler(req, res) {
       if (used >= 500 && paid <= 0) return res.status(403).json({ error: "クレジット不足" });
     }
 
-    // 2. 技法の抽出
+    // 2. 技法プロンプト作成
     const selB = (boke || []).map(k => BOKE_DEFS[k]).filter(Boolean);
     const selT = (tsukkomi || []).map(k => TSUKKOMI_DEFS[k]).filter(Boolean);
     const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
-    // 3. プロンプト（文字数厳守の指示を強化）
-    const prompt = `プロの漫才作家として台本を日本語で作成してください。
+    // 3. 初回プロンプト（文字数厳守を強調）
+    const initialPrompt = `プロの漫才作家として台本を日本語で作成してください。
 題材: ${theme}
 ジャンル: ${genre}
 条件:
 - 登場人物: ${names.join(", ")}
-- 【重要】文字数: 必ず「${minChar}文字以上」書いてください。短すぎる台本は禁止です。上限は${maxChar}文字です。
+- 【最重要】文字数: 必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
 - 形式: 1行目に【タイトル】、次に本文。セリフの間には必ず「1行の空白」のみを入れてください。
-- 話者が変わるごとに空行を入れてください。
 - 最後は必ず「${names[1] || "B"}: もういいよ！」で締める。
 
-■採用する技法（以下の技法を必ず台本内で実践してください）:
+■採用する技法:
 ${techniquesText}`;
 
-    // 4. AI生成 (モデルは gemini-3-flash-preview)
-    const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
-    const model = "gemini-3-flash-preview"; 
-    const apiKey = process.env.GEMINI_API_KEY;
-    const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
+    // 4. 初回AI生成
+    const rawText1 = await callGemini(initialPrompt, apiKey);
+    let { title, cleanBody } = formatScript(rawText1, names);
 
-    const aiResp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        contents: [{ parts: [{ text: prompt }] }],
-        // トークン数を増やして長文に対応
-        generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
-      })
-    });
-
-    if (!aiResp.ok) {
-      const errData = await aiResp.json();
-      throw new Error(`Gemini API Error: ${JSON.stringify(errData)}`);
-    }
-
-    const aiData = await aiResp.json();
-    const raw = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    if (!raw) throw new Error("AI返答が空です");
-
-    // 5. 高速成形
-    let lines = raw.split("\n").map(l => l.trim()).filter(l => l !== "");
+    // 5. 【自己検証プロセス】文字数が範囲外なら修正（リトライ）
+    const currentLen = cleanBody.length;
     
-    // タイトル抽出とクリーニング（強化版）
-    let title = "無題の漫才";
-    if (lines[0]) {
-      // 1行目をタイトル候補として取得
-      const rawTitle = lines[0];
-      // 【】、""、「」、Markdown(#)、および "タイトル:" "Title" などの接頭辞を除去
-      const cleanTitle = rawTitle
-        .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "") // 先頭の「タイトル:」などを除去
-        .replace(/^[\#\s]+/, "") // Markdownの#を除去
-        .replace(/^【|】$/g, "") // 【】を除去
-        .replace(/^「|」$/g, "") // 「」を除去
-        .replace(/^"|"$/g, "")   // ""を除去
-        .trim();
+    // 範囲外（±10%を超えている）の場合のみ、修正AIコールを実行
+    if (currentLen < minLimit || currentLen > maxLimit) {
+      // 修正指示の作成
+      let fixInstruction = "";
+      if (currentLen < minLimit) {
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケを増やし、必ず${minLimit}文字以上にしてください。`;
+      } else {
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉を削って必ず${maxLimit}文字以下に要約してください。`;
+      }
 
-      if (cleanTitle) {
-        title = cleanTitle;
-        lines.shift(); // タイトル行を本文配列から削除
+      const retryPrompt = `以下の漫才台本を修正してください。
+【修正指示】: ${fixInstruction}
+
+- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は維持してください。
+- 技法はそのまま活かしてください。
+
+【現在の台本】:
+【${title}】
+${cleanBody}`;
+
+      try {
+        // リトライ生成（高速化のため同じモデルを使用）
+        const rawText2 = await callGemini(retryPrompt, apiKey);
+        // 再フォーマット
+        const res2 = formatScript(rawText2, names);
+        // タイトルが変わってなければ元のタイトルを優先（空でなければ新しいタイトル採用）
+        if (res2.title && res2.title !== "無題の漫才") {
+            title = res2.title;
+        }
+        cleanBody = res2.cleanBody;
+      } catch (e) {
+        console.warn("Retry generation failed:", e);
+        // リトライ失敗時は初回生成分を返す（エラーにはしない）
       }
     }
-    
-    // 本文の成形：話者コロンの正規化と、セリフ間1行空けの適用
-    let bodyText = lines.join("\n\n").replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
-    
-    // オチの付与
-    const outro = `${names[1] || "B"}: もういいよ！`;
-    if (!bodyText.includes("もういいよ")) {
-      bodyText = bodyText.trim() + "\n\n" + outro;
-    }
-
-    // ★以前の「強制トリミング処理」は削除しました。
-    // プロンプトで指定した文字数を尊重し、AIが出力した全量を返します。
-    
-    // 特殊文字排除（iPhoneでの解析エラー防止）
-    const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
 
     // 6. DB更新（成功時のみ消費）
     if (supabase && user_id) {
@@ -153,7 +198,7 @@ ${techniquesText}`;
       });
     }
 
-    // 7. iPhone (Swift/Codable) 向けレスポンス
+    // 7. iPhoneレスポンス
     return res.status(200).json({
       status: "success",
       title: String(title),
