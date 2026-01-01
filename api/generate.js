@@ -473,7 +473,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     `- 文字数は必ず ${minLen}文字以上 あるか？`,
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
-    `- タイトルと本文の間には空行があるか？`,
+    `- タイトルと本文の間による空行があるか？`,
     `- 現実的なネタにしているか？`,
     `→ 1つでもNoなら、即座に修正してから出力。`,
   ].join("\n");
@@ -505,7 +505,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
     "- 文字数は \\${minLen}〜\\${maxLen} か？",
     "− 各台詞は「名前: セリフ」形式か？",
     "- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？",
-    "- タイトルと本文の間には空行があるか？",
+    "- タイトルと本文の間による空行があるか？",
     "- 現実的なネタにしているか？",
     // ★追加要素1：具体性の強制
     "- 【超重要】「固有名詞」や「具体的な数字」を必ず使うこと。「美味しい店」ではなく「サイゼリヤ」、「高い」ではなく「35年ローン」など、映像が浮かぶ具体的な言葉選びをすること。",
@@ -668,7 +668,7 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
     `- 各台詞は「名前: セリフ」形式か？`,
     `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
     `- 現実的なネタにしているか？`,
-    "- タイトルと本文の間には必ず空行があるか？",
+    "- タイトルと本文の間による空行があるか？",
     // ★追加要素4：笑いの質チェック
     "- ボケの言葉選びは一般的すぎないか？（もっと具体的な単語に直せないか？）",
     "- ツッコミは単なる「説明」になっていないか？（ボケの異常さを嘆く、呆れる、強く否定する等の「感情」が乗っているか？）",
@@ -760,30 +760,27 @@ export default async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
 
     // ★ 追加：購入反映モード（credit_100 のみ 100 付与）
-    // フロント側で購入後に { action: "add_credit", product_id: "credit_100", user_id } を POST する想定。
     if (req.body?.action === "add_credit") {
       try {
         const { user_id, product_id } = req.body || {};
         if (!user_id) return res.status(400).json({ error: "user_id required" });
         const nextPaid = await addCreditsForPurchase(user_id, product_id);
-        return res.status(200).json({ ok: true, paid_credits: nextPaid, product_id });
+        return res.status(200).json({ ok: true, paid_credits: Math.floor(nextPaid), product_id });
       } catch (e) {
         const ee = normalizeError(e);
-        const status = ee.status || 500;
-        return res.status(status).json({ error: "add_credit failed", detail: ee });
+        return res.status(ee.status || 500).json({ error: "add_credit failed", detail: ee });
       }
     }
 
     const { theme, genre, characters, length, boke, tsukkomi, general, user_id } = req.body || {};
 
- // 生成前：残高チェックのみ（消費なし）
     const gate = await checkCredit(user_id);
     if (!gate.ok) {
       const row = gate.row || { output_count: 0, paid_credits: 0 };
       return res.status(403).json({
         error: `使用上限（${FREE_QUOTA}回）に達しており、クレジットが不足しています。`,
-        usage_count: row.output_count,
-        paid_credits: row.paid_credits,
+        usage_count: Math.floor(row.output_count || 0),
+        paid_credits: Math.floor(row.paid_credits || 0),
       });
     }
 
@@ -795,9 +792,9 @@ export default async function handler(req, res) {
       minLen,
       tsukkomiName,
       targetLen,
-      safeTheme, // ★追加：検証用に受け取る
-      safeGenre, // ★追加
-      charDesc   // ★追加
+      safeTheme,
+      safeGenre,
+      charDesc
     } = buildPrompt({
       theme,
       genre,
@@ -810,155 +807,90 @@ export default async function handler(req, res) {
       },
     });
 
-    // モデル呼び出し（Gemini ラッパー）★余裕UP
     const approxMaxTok = Math.min(8192, Math.ceil(Math.max(maxLen * 2, 3500) * 3));
-    const messages = [
-      {
-        role: "system",
-        content:
-          "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。",
-      },
-      { role: "user", content: prompt },
-    ];
     const payload = {
       model: DEFAULT_MODEL,
-      messages,
+      messages: [{ role: "system", content: "漫才師です。" }, { role: "user", content: prompt }],
       temperature: 0.7,
       max_output_tokens: approxMaxTok,
-      max_tokens: approxMaxTok,
     };
 
     let completion;
     try {
       completion = await client.chat.completions.create(payload);
     } catch (err) {
-      const e = normalizeError(err);
-      console.error("[deepseek error]", e); // ラベルはそのまま維持
-      // 後払い方式：ここでは消費しない
-      return res.status(e.status || 500).json({ error: "Gemini request failed", detail: e });
+      return res.status(500).json({ error: "Gemini failed", detail: normalizeError(err) });
     }
 
-    // 整形（★順序を安定化：normalize → 空行 → 落ち付与）
     let raw = completion?.choices?.[0]?.message?.content?.trim() || "";
     let split = splitTitleAndBody(raw);
-    // ★ タイトルは必ず1つ：本文先頭の重複タイトルを除去、必要なら抽出
     const dedup = ensureSingleTitle(split.title, split.body);
     let title = dedup.title;
     let body = dedup.body;
 
-    body = enforceCharLimit(body, minLen, Number.MAX_SAFE_INTEGER, true); // 上限で切らない
     body = normalizeSpeakerColons(body);
     body = ensureBlankLineBetweenTurns(body);
     body = ensureTsukkomiOutro(body, tsukkomiName);
 
-    // 指定文字数との差を補う
     const deficit = targetLen - body.length;
     if (deficit >= 30) {
       try {
-        body = await generateContinuation({
-          client,
-          model: DEFAULT_MODEL,
-          baseBody: body,
-          remainingChars: deficit,
-          tsukkomiName,
-        });
-        // 追記後も同じ順序で仕上げ
+        body = await generateContinuation({ client, model: DEFAULT_MODEL, baseBody: body, remainingChars: deficit, tsukkomiName });
         body = normalizeSpeakerColons(body);
         body = ensureBlankLineBetweenTurns(body);
         body = ensureTsukkomiOutro(body, tsukkomiName);
-      } catch (e) {
-        console.warn("[continuation] failed:", e?.message || e);
-      }
+      } catch (e) {}
     }
 
-    // ★ 自己検証＆自動修正（採用する技法の担保）
-    const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
     try {
-      body = await selfVerifyAndCorrectBody({
-        client,
-        model: DEFAULT_MODEL,
-        body,
-        requiredTechs: requiredForCheck,
-        minLen,
-        maxLen,
-        tsukkomiName,
-        theme: safeTheme, // ★検証用に渡す
-        genre: safeGenre, // ★検証用に渡す
-        charDesc: charDesc // ★検証用に渡す
-      });
-    } catch (e) {
-      console.warn("[self-verify] failed:", e?.message || e);
-      // 検証が失敗しても致命的にはしない（本文は現状のまま続行）
-    }
+      body = await selfVerifyAndCorrectBody({ client, model: DEFAULT_MODEL, body, requiredTechs: techniquesForMeta, minLen, maxLen, tsukkomiName, theme: safeTheme, genre: safeGenre, charDesc });
+    } catch (e) {}
 
-    // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
-    // ★ タイトル再生成（本文の確定後に、内容と整合させるため）
-    if (typeof body === "string" && body.trim().length > 0) {
-        try {
-            const newTitle = await generateTitleForBody({ client, model: DEFAULT_MODEL, body });
-            if (newTitle && newTitle.length > 0) {
-                title = newTitle;
-            }
-        } catch (e) {
-            console.warn("[title-gen] failed:", e?.message || e);
-        }
+    if (body.trim()) {
+      try {
+        const newTitle = await generateTitleForBody({ client, model: DEFAULT_MODEL, body });
+        if (newTitle) title = newTitle;
+      } catch (e) {}
     }
 
-    // 成功判定：★本文非空のみ（語尾揺れで落とさない）
-    const success = typeof body === "string" && body.trim().length > 0;
-    if (!success) {
-      // 失敗：消費しない
-      return res.status(500).json({ error: "Empty output" });
-    }
+    if (!body.trim()) return res.status(500).json({ error: "Empty" });
 
-    // 成功：ここで初めて消費（consumeAfterSuccess は内部でエラーを握りつぶし、絶対に throw しない）
     await consumeAfterSuccess(user_id);
 
-    // 残量取得
-    let metaUsage = null;
-    let metaCredits = null;
+    let metaUsage = 0;
+    let metaCredits = 0;
     if (hasSupabase && user_id) {
       try {
         const row = await getUsageRow(user_id);
-        metaUsage = row.output_count ?? null;
-        metaCredits = row.paid_credits ?? null;
-      } catch (e) {
-        console.warn("[supabase] fetch after consume failed:", e?.message || e);
-      }
+        metaUsage = row.output_count || 0;
+        metaCredits = row.paid_credits || 0;
+      } catch (e) {}
     }
 
-    // ★ iPhone/SwiftのJSONDecoder対策：
-    // AIが生成した文字列に混入する可能性がある特殊なUnicode（行区切り文字など）を、
-    // 標準的な改行コードに置換してから送信する。
-    const sanitizedBody = body
-      .replace(/[\u2028\u2029]/g, "\n")
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ""); // 制御文字も除去
+    // ★ iPhone (Swift/Codable) 対策の徹底
+    // 1. null値を排除し、すべてプリミティブな整数に変換
+    // 2. 特殊Unicode文字を除去し、標準的な改行のみにする
+    const cleanBody = body.replace(/[\u2028\u2029]/g, "\n").replace(/[\x00-\x1F\x7F-\x9F]/g, (match) => (match === "\n" || match === "\r" || match === "\t" ? match : ""));
 
-    // レスポンスヘッダーに明示的に charset=utf-8 を指定
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-
     return res.status(200).json({
-      title: title || "（タイトル未設定）",
-      body: sanitizedBody || "（ネタの生成に失敗しました）",
-      text: sanitizedBody || "（ネタの生成に失敗しました）",
-      content: sanitizedBody || "（ネタの生成に失敗しました）", // 念のため3種類のキー名で返す
+      status: "success",
+      title: String(title || "無題"),
+      body: String(cleanBody),
+      text: String(cleanBody),
+      content: String(cleanBody),
       meta: {
-        structure: structureMeta,
-        techniques: techniquesForMeta,
-        usage_count: metaUsage ? Math.floor(metaUsage) : 0,
-        paid_credits: metaCredits ? Math.floor(metaCredits) : 0,
-        target_length: targetLen ? Math.floor(targetLen) : 0,
-        min_length: minLen ? Math.floor(minLen) : 0,
-        max_length: maxLen ? Math.floor(maxLen) : 0,
-        actual_length: sanitizedBody.length,
-      },
+        structure: Array.isArray(structureMeta) ? structureMeta : [],
+        techniques: Array.isArray(techniquesForMeta) ? techniquesForMeta : [],
+        usage_count: Math.floor(Number(metaUsage)),
+        paid_credits: Math.floor(Number(metaCredits)),
+        target_length: Math.floor(Number(targetLen)),
+        actual_length: Math.floor(Number(cleanBody.length))
+      }
     });
   } catch (err) {
-    const e = normalizeError(err);
-    console.error("[handler error]", e);
-    // 失敗：もちろん消費しない
-    return res.status(500).json({ error: "Server Error", detail: e });
+    return res.status(500).json({ error: "Server Error", detail: normalizeError(err) });
   }
 }
