@@ -74,6 +74,7 @@ function formatScript(rawText, names) {
     const cleanTitle = rawTitle
       .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "") // "タイトル:"を除去
       .replace(/[\[\]【】「」""]/g, "") // 【】、「」、[]、"" を除去
+      .replace(/タイトル/g, "") // ★修正1: 「タイトル」という文字そのものを削除
       .replace(/^[\#\s]+/, "") // Markdownの#を除去
       .trim();
     
@@ -84,7 +85,7 @@ function formatScript(rawText, names) {
     }
   }
 
-  // 本文成形：修正箇所
+  // 本文成形
   // 1. join("\n\n") で結合して、Androidでも確実に1行空くようにする
   // 2. replace(/\n{3,}/g, "\n\n") で、万が一3行以上の改行（2行以上の空き）があれば1行空きに正規化する
   let bodyText = lines.join("\n\n").replace(/\n{3,}/g, "\n\n");
@@ -93,10 +94,13 @@ function formatScript(rawText, names) {
   bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
   
   const outro = `${names[1] || "B"}: もういいよ！`;
-  if (!bodyText.includes("もういいよ")) {
-    // 結合時も \n\n (1行空き) にする
-    bodyText = bodyText.trim() + "\n\n" + outro;
-  }
+  
+  // ★修正2: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
+  // 正規表現: 行頭or改行 + (名前:)? + もういいよ + (!や！)* + 文末
+  bodyText = bodyText.replace(/(?:^|\n)(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*$/, "");
+  
+  // 最後に正規のオチを付与（結合時も \n\n (1行空き) にする）
+  bodyText = bodyText.trim() + "\n\n" + outro;
 
   // 特殊文字排除
   const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
