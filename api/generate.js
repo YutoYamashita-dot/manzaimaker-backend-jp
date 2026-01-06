@@ -85,17 +85,17 @@ function formatScript(rawText, names) {
   }
 
   // 本文成形：修正箇所
-  // 1. join("\n") で結合
-  // 2. replace(/\n{2,}/g, "\n") で連続する改行を強制的に1つにする
-  let bodyText = lines.join("\n").replace(/\n{2,}/g, "\n");
+  // 1. join("\n\n") で結合して、Androidでも確実に1行空くようにする
+  // 2. replace(/\n{3,}/g, "\n\n") で、万が一3行以上の改行（2行以上の空き）があれば1行空きに正規化する
+  let bodyText = lines.join("\n\n").replace(/\n{3,}/g, "\n\n");
 
   // 話者コロンの正規化
   bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
   
   const outro = `${names[1] || "B"}: もういいよ！`;
   if (!bodyText.includes("もういいよ")) {
-    // 結合時も \n 1つにする
-    bodyText = bodyText.trim() + "\n" + outro;
+    // 結合時も \n\n (1行空き) にする
+    bodyText = bodyText.trim() + "\n\n" + outro;
   }
 
   // 特殊文字排除
