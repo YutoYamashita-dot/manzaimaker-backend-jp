@@ -4,11 +4,11 @@ export const config = { runtime: "nodejs" };
 import { createClient } from "@supabase/supabase-js";
 
 // Supabase設定
-const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) 
+const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY) : null;
 
 /* =========================
-1. 技法 定義テーブル
+技法 定義テーブル
 ========================= */
 const BOKE_DEFS = {
   IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
@@ -40,13 +40,13 @@ const GENERAL_DEFS = {
 // 共通AI呼び出し関数（エラーハンドリング付き）
 async function callGemini(prompt, apiKey) {
   const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
-  const model = "gemini-3-flash-preview"; 
+  const model = "gemini-3-flash-preview";
   const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
 
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 
+    body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
     })
@@ -72,12 +72,12 @@ function formatScript(rawText, names) {
   if (lines[0]) {
     const rawTitle = lines[0];
     const cleanTitle = rawTitle
-      .replace(/^(タイトル|Title)\s*[:：\-]?\s*/i, "") // "タイトル:"を除去
+      .replace(/^(タイトル|Title)\s*[:：-]?\s*/i, "") // "タイトル:"を除去
       .replace(/[\[\]【】「」""]/g, "") // 【】、「」、[]、"" を除去
       .replace(/タイトル/g, "") // ★修正1: 「タイトル」という文字そのものを削除
-      .replace(/^[\#\s]+/, "") // Markdownの#を除去
+      .replace(/^[#\s]+/, "") // Markdownの#を除去
       .trim();
-    
+
     // 1行目が「名前: セリフ」の形式でない場合のみタイトルとみなす
     if (cleanTitle && !rawTitle.includes(":")) {
       title = cleanTitle;
@@ -90,18 +90,17 @@ function formatScript(rawText, names) {
 
   // 話者コロンの正規化
   bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
-  
+
   const outro = `${names[1] || "B"}: もういいよ！`;
-  
-  // ★修正箇所: 末尾に「もういいよ」が1つでも複数あっても、それら全てを削除する
-  bodyText = bodyText.replace(/(?:\s*(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*)+$/, "");
-  
+
+  // ★修正2: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
+  bodyText = bodyText.replace(/(?:^|\n)(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*$/, "");
+
   // 最後に正規のオチを付与
   bodyText = bodyText.trim() + "\n\n" + outro;
 
   // 特殊文字排除
   const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
-  
   return { title, cleanBody };
 }
 
@@ -137,23 +136,16 @@ export default async function handler(req, res) {
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
     // 3. 初回プロンプト（文字数厳守を強調）
-    const initialPrompt = `プロの漫才作家として、笑える台本を日本語で作成してください。
-
-【文字数制限：厳守】
-セリフ、句読点、記号、および指定された「改行（空行）」をすべて含めた合計文字数を、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。
-この範囲を1文字でも外れると失格です。構成を練ってから執筆してください。
-
+    const initialPrompt = `プロの漫才作家として爆笑できる台本を日本語で作成してください。
 題材: ${theme}
 ジャンル: ${genre}
-登場人物: ${names.join(", ")}
-
-【形式ルール】
-- 1行目に【タイトル】を書く。
-- 次の行から本文を開始する。
-- セリフの間には「必ず1行の空白」を入れる（これも文字数に含めて計算してください）。
+条件:
+- 登場人物: ${names.join(", ")}
+- 【最重要】文字数: 必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
+- 形式: 1行目に【タイトル】、次に本文。セリフの間には必ず「1行の空白」のみを入れてください。
 - 題材（${theme}）をフリとして、タブーに触れるようなボケやツッコミを必ず複数回入れてください。
 
-【採用する技法】
+■採用する技法:
 ${techniquesText}`;
 
     // 4. 初回AI生成
@@ -162,25 +154,21 @@ ${techniquesText}`;
 
     // 5. 【自己検証プロセス】文字数が範囲外なら修正（リトライ）
     const currentLen = cleanBody.length;
-    
+
     if (currentLen < minLimit || currentLen > maxLimit) {
       let fixInstruction = "";
       if (currentLen < minLimit) {
-        const diff = minLimit - currentLen;
-        fixInstruction = `現在の台本は ${currentLen}文字 です。目標範囲（${minLimit}〜${maxLimit}文字）に到達していません。あと最低 ${diff}文字 以上、内容を肉付けしてください。具体的には、ボケとツッコミのやり取りを2〜3往復追加し、描写を詳しくしてください。`;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケを増やし、必ず${minLimit}文字以上にしてください。`;
       } else {
-        const diff = currentLen - maxLimit;
-        fixInstruction = `現在の台本は ${currentLen}文字 です。目標範囲（${minLimit}〜${maxLimit}文字）を超過しています。あと ${diff}文字 以上、文字数を削ってください。笑いの芯は残したまま、冗長なセリフや繋ぎの言葉を削除してテンポを上げてください。`;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉を削って必ず${maxLimit}文字以下に要約してください。`;
       }
 
       const retryPrompt = `以下の漫才台本を修正してください。
+【修正指示】: ${fixInstruction}
+- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は維持してください。
+- 技法はそのまま活かしてください。
 
-【修正指示】
-${fixInstruction}
-- 形式（タイトル、セリフ間の1行空行、最後の「もういいよ！」）は絶対に崩さないでください。
-- 余計な解説や謝罪は一切不要です。修正後の台本のみを出力してください。
-
-【修正前の台本】
+【現在の台本】:
 【${title}】
 ${cleanBody}`;
 
@@ -188,7 +176,7 @@ ${cleanBody}`;
         const rawText2 = await callGemini(retryPrompt, apiKey);
         const res2 = formatScript(rawText2, names);
         if (res2.title && res2.title !== "無題の漫才") {
-            title = res2.title;
+          title = res2.title;
         }
         cleanBody = res2.cleanBody;
       } catch (e) {
@@ -200,12 +188,12 @@ ${cleanBody}`;
     if (supabase && user_id) {
       used += 1;
       if (used > 500 && paid > 0) paid -= 1;
-      await supabase.from("user_usage").upsert({ 
-        user_id, output_count: used, paid_credits: paid, updated_at: new Date().toISOString() 
+      await supabase.from("user_usage").upsert({
+        user_id, output_count: used, paid_credits: paid, updated_at: new Date().toISOString()
       });
     }
 
-    // 7. iPhoneレスポンス
+    // 7. レスポンス
     return res.status(200).json({
       status: "success",
       title: String(title),
@@ -221,14 +209,13 @@ ${cleanBody}`;
         target_length: targetLen
       }
     });
-
   } catch (err) {
     console.error("Handler Error:", err.message);
-    return res.status(500).json({ 
-      status: "error", 
-      title: "エラー", 
+    return res.status(500).json({
+      status: "error",
+      title: "エラー",
       body: "ネタの生成に失敗しました。時間をおいて試してください。",
-      meta: { usage_count: 0, paid_credits: 0 } 
+      meta: { usage_count: 0, paid_credits: 0 }
     });
   }
 }
