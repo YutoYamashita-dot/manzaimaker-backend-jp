@@ -137,7 +137,7 @@ export default async function handler(req, res) {
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
     // 3. 初回プロンプト（文字数厳守を強調）
-    const initialPrompt = `プロの漫才作家として、爆笑でき多くの人にわかりやすい台本を日本語で作成してください。
+    const initialPrompt = `プロの漫才作家として、笑える台本を日本語で作成してください。
 
 【文字数制限：厳守】
 セリフ、句読点、記号、および指定された「改行（空行）」をすべて含めた合計文字数を、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。
@@ -151,7 +151,7 @@ export default async function handler(req, res) {
 - 1行目に【タイトル】を書く。
 - 次の行から本文を開始する。
 - セリフの間には「必ず1行の空白」を入れる（これも文字数に含めて計算してください）。
-- 題材（${theme}）を軸に、複数のボケとツッコミ、そして鮮やかなオチを入れてください。
+- 題材（${theme}）をフリとして、タブーに触れるようなボケやツッコミを必ず複数回入れてください。
 
 【採用する技法】
 ${techniquesText}`;
