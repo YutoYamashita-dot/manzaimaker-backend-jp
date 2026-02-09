@@ -86,8 +86,6 @@ function formatScript(rawText, names) {
   }
 
   // 本文成形
-  // 1. join("\n\n") で結合して、Androidでも確実に1行空くようにする
-  // 2. replace(/\n{3,}/g, "\n\n") で、万が一3行以上の改行（2行以上の空き）があれば1行空きに正規化する
   let bodyText = lines.join("\n\n").replace(/\n{3,}/g, "\n\n");
 
   // 話者コロンの正規化
@@ -95,11 +93,10 @@ function formatScript(rawText, names) {
   
   const outro = `${names[1] || "B"}: もういいよ！`;
   
-  // ★修正2: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
-  // 正規表現: 行頭or改行 + (名前:)? + もういいよ + (!や！)* + 文末
-  bodyText = bodyText.replace(/(?:^|\n)(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*$/, "");
+  // ★修正箇所: 末尾に「もういいよ」が1つでも複数あっても、それら全てを削除する
+  bodyText = bodyText.replace(/(?:\s*(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*)+$/, "");
   
-  // 最後に正規のオチを付与（結合時も \n\n (1行空き) にする）
+  // 最後に正規のオチを付与
   bodyText = bodyText.trim() + "\n\n" + outro;
 
   // 特殊文字排除
@@ -140,16 +137,23 @@ export default async function handler(req, res) {
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
     // 3. 初回プロンプト（文字数厳守を強調）
-    const initialPrompt = `プロの漫才作家として台本を日本語で作成してください。
+    const initialPrompt = `プロの漫才作家として、爆笑でき多くの人にわかりやすい台本を日本語で作成してください。
+
+【文字数制限：厳守】
+セリフ、句読点、記号、および指定された「改行（空行）」をすべて含めた合計文字数を、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。
+この範囲を1文字でも外れると失格です。構成を練ってから執筆してください。
+
 題材: ${theme}
 ジャンル: ${genre}
-条件:
-- 登場人物: ${names.join(", ")}
-- 【最重要】文字数: 必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
-- 形式: 1行目に【タイトル】、次に本文。セリフの間には必ず「1行の空白」のみを入れてください。
-- 最後は必ず「${names[1] || "B"}: もういいよ！」で締める。
+登場人物: ${names.join(", ")}
 
-■採用する技法:
+【形式ルール】
+- 1行目に【タイトル】を書く。
+- 次の行から本文を開始する。
+- セリフの間には「必ず1行の空白」を入れる（これも文字数に含めて計算してください）。
+- 題材（${theme}）を軸に、複数のボケとツッコミ、そして鮮やかなオチを入れてください。
+
+【採用する技法】
 ${techniquesText}`;
 
     // 4. 初回AI生成
@@ -159,39 +163,36 @@ ${techniquesText}`;
     // 5. 【自己検証プロセス】文字数が範囲外なら修正（リトライ）
     const currentLen = cleanBody.length;
     
-    // 範囲外（±10%を超えている）の場合のみ、修正AIコールを実行
     if (currentLen < minLimit || currentLen > maxLimit) {
-      // 修正指示の作成
       let fixInstruction = "";
       if (currentLen < minLimit) {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケを増やし、必ず${minLimit}文字以上にしてください。`;
+        const diff = minLimit - currentLen;
+        fixInstruction = `現在の台本は ${currentLen}文字 です。目標範囲（${minLimit}〜${maxLimit}文字）に到達していません。あと最低 ${diff}文字 以上、内容を肉付けしてください。具体的には、ボケとツッコミのやり取りを2〜3往復追加し、描写を詳しくしてください。`;
       } else {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉を削って必ず${maxLimit}文字以下に要約してください。`;
+        const diff = currentLen - maxLimit;
+        fixInstruction = `現在の台本は ${currentLen}文字 です。目標範囲（${minLimit}〜${maxLimit}文字）を超過しています。あと ${diff}文字 以上、文字数を削ってください。笑いの芯は残したまま、冗長なセリフや繋ぎの言葉を削除してテンポを上げてください。`;
       }
 
       const retryPrompt = `以下の漫才台本を修正してください。
-【修正指示】: ${fixInstruction}
 
-- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は維持してください。
-- 技法はそのまま活かしてください。
+【修正指示】
+${fixInstruction}
+- 形式（タイトル、セリフ間の1行空行、最後の「もういいよ！」）は絶対に崩さないでください。
+- 余計な解説や謝罪は一切不要です。修正後の台本のみを出力してください。
 
-【現在の台本】:
+【修正前の台本】
 【${title}】
 ${cleanBody}`;
 
       try {
-        // リトライ生成（高速化のため同じモデルを使用）
         const rawText2 = await callGemini(retryPrompt, apiKey);
-        // 再フォーマット
         const res2 = formatScript(rawText2, names);
-        // タイトルが変わってなければ元のタイトルを優先（空でなければ新しいタイトル採用）
         if (res2.title && res2.title !== "無題の漫才") {
             title = res2.title;
         }
         cleanBody = res2.cleanBody;
       } catch (e) {
         console.warn("Retry generation failed:", e);
-        // リトライ失敗時は初回生成分を返す（エラーにはしない）
       }
     }
 
