@@ -93,8 +93,9 @@ function formatScript(rawText, names) {
 
   const outro = `${names[1] || "B"}: もういいよ！`;
 
-  // ★修正2: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
-  bodyText = bodyText.replace(/(?:^|\n)(?:[^\n:：]+[：:])?\s*もういいよ[！!]*\s*$/, "");
+  // ★修正: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
+  // trim()で末尾空白を除去し、最後の行が「もういいよ」で終わっていれば行ごと削除
+  bodyText = bodyText.trim().replace(/(?:^|\n).*?もういいよ[！!]*$/g, "");
 
   // 最後に正規のオチを付与
   bodyText = bodyText.trim() + "\n\n" + outro;
