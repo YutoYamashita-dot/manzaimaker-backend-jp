@@ -5,15 +5,15 @@ import { createClient } from "@supabase/supabase-js";
 const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY) : null;
 
-// 共通AI呼び出し
-async function callGemini(prompt, apiKey) {
+// 共通AI呼び出し (最大出力トークン数を動的に制御できるように引数を追加)
+async function callGemini(prompt, apiKey, maxTokens = 2000) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
+      generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens },
       safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" }
@@ -25,7 +25,7 @@ async function callGemini(prompt, apiKey) {
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-// シンプルな整形関数
+// シンプルな整形関数 (コメントとコードの結合バグを修復)
 function formatScript(rawText) {
   // 1. 無駄な改行やMarkdownの囲い(```)を消去
   let text = rawText.replace(/```[a-z]*\n?/g, "").replace(/```/g, "").trim();
@@ -54,6 +54,9 @@ export default async function handler(req, res) {
   const min = Math.floor(length * 0.9);
   const max = Math.floor(length * 1.1);
 
+  // 日本語の最大文字数制限（max）に合わせた動的な出力枠制限 (1文字≒1.5〜1.8トークン換算)
+  const maxTokens = Math.min(4000, Math.max(300, Math.ceil(max * 1.8) + 150));
+
   try {
     // クレジットチェック
     let used = 0, paid = 0;
@@ -63,24 +66,44 @@ export default async function handler(req, res) {
       paid = data?.paid_credits ?? 0;
     }
 
-    // プロンプト作成（シンプルかつ強力に）
+    // プロンプト作成（テーマと文字数を厳守させる強固な指示にアップグレード）
     const prompt = `漫才作家として「${theme}」を題材にした${genre}漫才を作ってください。
 以下のルールを厳守してください：
-1. 1行目：【タイトル】
+1. 1行目：【タイトル】（タイトルは「${theme}」に深く関連したものにしてください）
 2. 2行目以降：漫才のセリフ（「名前: セリフ」の形式）
 3. 最後に「もういいよ！」で終わる。
-4. 全体の総文字数を必ず「${min}文字〜${max}文字」にする。
-5. 余計な挨拶、解説、ト書き（かっこ書き）は一切書かない。
+4. 【最重要・文字数厳守】タイトルと空白、話者名を含めた「全体の総文字数」を必ず「${min}文字〜${max}文字」の範囲内に収めてください。これより短すぎても長すぎてもいけません。
+5. 【テーマ厳守】漫才のツカミ、本編、オチに至るまで、完全に「${theme}」を主軸にした内容にしてください。無関係な話題に脱線しないでください。
+6. 余計な挨拶、解説、ト書き（かっこ書き）は一切書かない。
 
 登場人物：${names.join(", ")}`;
 
-    let raw = await callGemini(prompt, apiKey);
+    let raw = await callGemini(prompt, apiKey, maxTokens);
     let result = formatScript(raw);
 
     // 文字数が大幅に違う場合のみ1回だけリトライ
     if (result.body.length < min || result.body.length > max) {
-      const retryPrompt = `以下の漫才を、内容は変えず「${min}〜${max}文字」になるように調整して出力し直してください。現在${result.body.length}文字です。解説は不要です。\n\n${raw}`;
-      raw = await callGemini(retryPrompt, apiKey);
+      let adjustmentGuide = "";
+      if (result.body.length < min) {
+        const diff = length - result.body.length;
+        adjustmentGuide = `現在の台本の文字数は ${result.body.length}文字 で、目標の「${min}〜${max}文字（中央値 ${length}文字）」に対して短すぎます。
+あと約 ${diff}文字 不足しています。設定や題材は変えずに、ボケとツッコミのラリーを2〜3往復分追加して内容を増やし、必ず目標範囲に収めてください。`;
+      } else {
+        const diff = result.body.length - length;
+        adjustmentGuide = `現在の台本の文字数は ${result.body.length}文字 で、目標の「${min}〜${max}文字（中央値 ${length}文字）」に対して長すぎます。
+約 ${diff}文字 超過しています。テーマ「${theme}」を主軸にした内容は保ったまま、冗長な表現や余分なセリフを削って短縮し、必ず目標範囲に収めてください。`;
+      }
+
+      const retryPrompt = `以下の漫才を、指示に従って修正し、「${min}〜${max}文字」の範囲に調整して出力し直してください。余計な挨拶や解説、ト書きは不要です。
+
+【修正指示】: ${adjustmentGuide}
+
+【現在の台本】:
+【${result.title}】
+${result.body}`;
+
+      // リトライ時は出力上限を少し緩和して呼び出し
+      raw = await callGemini(retryPrompt, apiKey, maxTokens + 100);
       result = formatScript(raw);
     }
 
