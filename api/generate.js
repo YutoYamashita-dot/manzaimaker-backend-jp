@@ -37,19 +37,20 @@ const GENERAL_DEFS = {
   TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。",
 };
 
-// 共通システム指示 (文字数制約の遵守を徹底)
+// 共通システム指示 (ト書きや余計な解説の出力を強固に禁止)
 const SYSTEM_INSTRUCTION = `あなたはプロの漫才作家です。指定された「題材」を100%主軸とし、最初から最後までその題材について徹底的にボケてツッコみあう、爆笑できる漫才台本を日本語で作成または修正してください。
-指定された文字数の制約を守るため、無駄な長文や不要な世間話への脱線は絶対にしないでください。
+テーマと関係のない不要な長文、世間話への脱線は絶対にしないでください。
+台本の「会話（発言）テキスト」以外のト書き（演出指示などの括弧書き）、技法名、文字数などの注釈は絶対に含めないでください。
 
 ■ 出力フォーマットの厳格なルール：
 1. 1行目は【タイトル】のみを出力してください。（例：【タイトルの名前】）※「タイトル: 」などの余計な記述やMarkdownの「#」は絶対に含めないでください。
 2. 2行目以降が本文（台本）となります。
-3. セリフの間には、必ず「1行の空白（空行）」を1つだけ入れてください。
+3. セリフの間には、必ず「1行 of 空白（空行）」を1つだけ入れてください。
 4. 話者とセリフは半角コロンまたは全角コロンで区切ってください。（例：A: 〜〜 または A：〜〜）
 5. 台本の最後は、ツッコミ側のセリフ「もういいよ！」で終わるようにしてください。
 6. Markdownの装飾記号（「#」や「**」、「\`\`\`」など）は、出力に一切含めないでください。プレーンテキストのみで出力してください。`;
 
-// 共通AI呼び出し関数 (動的なmaxTokens引数を追加)
+// 共通AI呼び出し関数
 async function callGemini(prompt, systemInstruction, apiKey, maxTokens = 4000) {
   const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
   const model = "gemini-3.5-flash";
@@ -59,7 +60,7 @@ async function callGemini(prompt, systemInstruction, apiKey, maxTokens = 4000) {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { 
       temperature: 0.7, 
-      maxOutputTokens: maxTokens // 動的に制限されたトークン数を指定
+      maxOutputTokens: maxTokens 
     },
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -99,7 +100,7 @@ async function callGemini(prompt, systemInstruction, apiKey, maxTokens = 4000) {
   return text;
 }
 
-// テキスト整形関数
+// テキスト整形関数 (不要なト書き・演出指示・技法解説・メタ注釈を完全に排除して純粋なテキストのみにクレンジング)
 function formatScript(rawText, names) {
   let cleanText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   let title = "無題の漫才";
@@ -113,12 +114,18 @@ function formatScript(rawText, names) {
       .replace(/[\[\]「」""]/g, "")
       .trim();
     
+    // 抽出したタイトル部分（【...】）を本文から一旦削除
     cleanText = cleanText.replace(/【[^】]+】/, "").trim();
   }
 
+  // 2. 本文から「テキストではないもの（ト書き・動作指示・技法解説タグ・AIの自己評価など）」を完全に除去
+  // 例: （笑い）、(立ち上がる)、（比喩ボケ）、【伏線回収】、[文字数: 350] などを強力に消去
+  cleanText = cleanText.replace(/[\(（\[【][^）\]】]*[\)）\]】]/g, "");
+
   let lines = cleanText.split("\n").map(l => l.trim());
 
-  // 2. 台本前の「前置き」の自動カット
+  // 3. 台本前の「前置き（AIの余計な導入テキストなど）」の自動カット
+  // セリフの開始形式（「話者名:」または「話者名：」）を検知するまで先頭行を削除し続ける
   while (lines.length > 0) {
     const firstLine = lines[0];
     if (firstLine === "") {
@@ -133,7 +140,8 @@ function formatScript(rawText, names) {
     }
   }
 
-  // 3. 台本後の「後書き」の自動カット
+  // 4. 台本後の「後書き（AIの解説テキストなど）」の自動カット
+  // 末尾から、セリフ形式でも「もういいよ」でもない不要な解説文を削除
   while (lines.length > 0) {
     const lastLine = lines[lines.length - 1];
     if (lastLine === "") {
@@ -148,20 +156,20 @@ function formatScript(rawText, names) {
     }
   }
 
-  // 4. 空行をリセットし、セリフ間の空行を「1行」に統一
+  // 5. 空行をリセットし、セリフ間の空行を「1行」に統一
   let tempLines = lines.filter(l => l !== "");
   let bodyText = tempLines.join("\n\n").replace(/\n{3,}/g, "\n\n");
 
-  // 5. コロンの半角コロン＋半角スペースへの正規化
+  // 6. コロンの半角コロン＋半角スペースへの正規化
   bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
 
   const outro = `${names[1] || "B"}: もういいよ！`;
 
-  // 6. 「もういいよ」の重複防止と最終オチの付与
+  // 7. 「もういいよ」の重複防止と最終オチの付与
   bodyText = bodyText.trim().replace(/(?:^|\n).*?もういいよ[！!]*$/g, "");
   bodyText = bodyText.trim() + "\n\n" + outro;
 
-  // 7. 特殊文字・無効な制御コードの徹底排除
+  // 8. 特殊文字・無効な制御コードの徹底排除
   const cleanBody = bodyText
     .replace(/[\u2028\u2029]/g, "\n")
     .replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
@@ -184,8 +192,7 @@ export default async function handler(req, res) {
   const minLimit = Math.floor(targetLen * 0.9);
   const maxLimit = Math.floor(targetLen * 1.1);
 
-  // 【最重要】目標文字数から動的にAI出力トークン上限を算出。長く書きすぎるのを原理的に防ぎます
-  // (日本語は1文字≒1.5〜1.8トークン換算。途中で切れないよう余裕を持たせつつ最大値を制限)
+  // 目標文字数から動的にAI出力トークン上限を算出
   const maxTokens = Math.min(4000, Math.max(300, Math.ceil(maxLimit * 1.8) + 150));
 
   try {
@@ -208,7 +215,7 @@ export default async function handler(req, res) {
     const estimatedLines = Math.round(targetLen / 22);
     const estimatedTurns = Math.round(estimatedLines / 2);
 
-    // 3. 初回プロンプト（「全体の文字数」の定義をAIと統一）
+    // 3. 初回プロンプト (テキストではないものの出力禁止を徹底指示)
     const initialPrompt = `以下の指示と条件に従い、漫才台本を生成してください。
 
 題材: ${theme}
@@ -218,6 +225,7 @@ export default async function handler(req, res) {
 - 登場人物: ${names.join(", ")}
 - 【最重要】文字数制限: タイトルや「話者名:」、「空白行」、「オチのもういいよ！」を含めた【出力するテキスト全体の総文字数】を、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
 - 【分量の目安】: 合計で約 ${estimatedLines} 行（登場人物同士のセリフが約 ${estimatedTurns} 往復。1つのセリフあたり平均 15〜25 文字程度）で構成すると、ちょうど目標文字数に収まります。
+- 【禁止】: ト書き（演出指示・動作指示などの括弧書き：例「（笑い）」「（驚く）」など）、採用した技法名、文字数カウントなどの【台本セリフ（会話）以外のテキスト】は絶対に含めないでください。
 - 題材（${theme}）に関連した、ちょっとしたツカミ要素を入れること。
 - 題材（${theme}）をフリとして、多くの人が薄々知っている/思っているけどあえて口に出しては言わないこと（あるあるや矛盾、共通認識など）をボケやツッコミとして必ず複数回入れてください。
 - 題材（${theme}）に関連した、大喜利の回答のようなボケやツッコミを必ず複数回入れてください。
@@ -226,7 +234,7 @@ export default async function handler(req, res) {
 ■ 採用する技法:
 ${techniquesText}`;
 
-    // 4. 初回AI生成 (計算したmaxTokensを渡して出力量を抑制)
+    // 4. 初回AI生成
     const rawText1 = await callGemini(initialPrompt, SYSTEM_INSTRUCTION, apiKey, maxTokens);
     let { title, cleanBody } = formatScript(rawText1, names);
 
@@ -243,12 +251,12 @@ ${techniquesText}`;
         const diff = targetLen - currentLen;
         fixInstruction = `現在の総文字数は ${currentLen}文字 で、目標の「${minLimit}〜${maxLimit}文字（中央値 ${targetLen}文字）」に対して少なすぎます。
 あと約 ${diff}文字 ほど内容を増やす必要があります。
-【具体的な修正方法】: 題材「${theme}」に沿った、ボケとツッコミのセリフのラリーを「2〜3往復分追加」し、全体のボリュームを増やしてください。`;
+【具体的な修正方法】: 題材「${theme}」に沿った、ボケとツッコミのセリフのラリーを「2〜3往復分追加」し、全体のボリュームを増やしてください。ト書き（括弧書き）は絶対に含めないでください。`;
       } else {
         const diff = currentLen - targetLen;
         fixInstruction = `現在の総文字数は ${currentLen}文字 で、目標の「${minLimit}〜${maxLimit}文字（中央値 ${targetLen}文字）」に対して多すぎます。
 約 ${diff}文字 ほど長すぎます。
-【具体的な修正方法】: 題材「${theme}」と関係のない不要なやりとり、または冗長な長いセリフを「2〜3往復分ごっそり削って」簡潔に要約し、全体のボリュームを大きく減らしてください。`;
+【具体的な修正方法】: 題材「${theme}」と関係のない不要なやりとり、または冗長な長いセリフを「2〜3往復分ごっそり削って」簡潔に要約し、全体のボリュームを大きく減らしてください。ト書き（括弧書き）は絶対に含めないでください。`;
       }
 
       const retryPrompt = `以下の現在の漫才台本を指示通りに修正してください。
@@ -256,6 +264,7 @@ ${techniquesText}`;
 【修正指示】: ${fixInstruction}
 - 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は厳格に維持してください。
 - 題材（${theme}）についての漫才であることを絶対に崩さず、技法をそのまま活かしてください。
+- ト書き（演出・動作指示などの括弧書き：例「（驚く）」など）は絶対に含めず、純粋な台詞テキストのみで構成してください。
 - Markdownなどの余計な装飾記号は一切加えないでください。
 
 【現在の台本】:
@@ -263,7 +272,6 @@ ${techniquesText}`;
 ${cleanBody}`;
 
       try {
-        // リトライ時は微調整のため、maxTokensを少し緩めて呼び出し
         const rawTextRetry = await callGemini(retryPrompt, SYSTEM_INSTRUCTION, apiKey, maxTokens + 100);
         const resRetry = formatScript(rawTextRetry, names);
         if (resRetry.title && resRetry.title !== "無題の漫才") {
