@@ -437,7 +437,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "",
     "■自己改稿プロセス（60点→100点）",
     "- まず頭の中で、与えられた条件（題材、ジャンル、登場人物、文字数）をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
-    "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見直す。",
+    "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見源にする。",
     "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
     "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
     "",
@@ -714,8 +714,8 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   // 仕上げ整形（順序固定）
   revised = normalizeSpeakerColons(revised);
   revised = ensureBlankLineBetweenTurns(revised);
-  revised = ensureTsukkomiOutro(revised, tsukkomiName);
   revised = enforceCharLimit(revised, minLen, maxLen, false);
+  revised = ensureTsukkomiOutro(revised, tsukkomiName);
 
   return revised;
 }
