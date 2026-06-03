@@ -40,7 +40,7 @@ const GENERAL_DEFS = {
 // 共通AI呼び出し関数（エラーハンドリング付き）
 async function callGemini(prompt, apiKey) {
   const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-3.5-flash";
   const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
 
   const resp = await fetch(url, {
