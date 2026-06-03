@@ -734,7 +734,7 @@ async function generateTitleForBody({ client, model, body }) {
   ].join("\n");
 
   const messages = [
-    { role: "system", content: "あなたは優秀な放送作家です。" },
+    { role: "system", content: "あなたは優秀な漫才作家です。" },
     { role: "user", content: prompt }
   ];
 
