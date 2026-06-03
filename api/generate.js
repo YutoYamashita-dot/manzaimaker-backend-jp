@@ -30,7 +30,7 @@ const TSUKKOMI_DEFS = {
 
 const GENERAL_DEFS = {
   SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
-  GYAKUHARI: "逆張り構成：期待・常飾を外して予想を逆手に取る。",
+  GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
   TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
   KANCHIGAI_TEISEI: "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
   SURECHIGAI: "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
@@ -60,7 +60,7 @@ async function callGemini(prompt, systemInstruction, apiKey) {
       temperature: 0.7, 
       maxOutputTokens: 4000 
     },
-    // 漫才の特異な表現（激しいツッコミ、暴言風のボケなど）による誤検知を回避する
+    // 漫才の特異な表現（激しいツッコミ、ボケなど）による安全フィルターの誤検知を完全に回避
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -69,7 +69,6 @@ async function callGemini(prompt, systemInstruction, apiKey) {
     ]
   };
 
-  // systemInstructionが指定されていればリクエストボディに付与
   if (systemInstruction) {
     requestBody.systemInstruction = {
       parts: [{ text: systemInstruction }]
@@ -100,45 +99,78 @@ async function callGemini(prompt, systemInstruction, apiKey) {
   return text;
 }
 
-// テキスト整形関数
+// テキスト整形関数 (Android/iOS側の表示・パースエラーを防ぐためのクレンジング強化版)
 function formatScript(rawText, names) {
-  let lines = rawText.split("\n").map(l => l.trim()).filter(l => l !== "");
+  // 改行コードを \n に統一し、不要な空白を除去
+  let cleanText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   let title = "無題の漫才";
 
-  // タイトル行の抽出と除去（強化版）
-  if (lines[0]) {
-    const rawTitle = lines[0];
-    const cleanTitle = rawTitle
-      .replace(/^(タイトル|Title)\s*[:：-]?\s*/i, "") // "タイトル:"を除去
-      .replace(/[\[\]【】「」""]/g, "") // 【】、「」、[]、"" を除去
-      .replace(/タイトル/g, "") // ★修正1: 「タイトル」という文字そのものを削除
-      .replace(/^[#\s]+/, "") // Markdownの#を除去
+  // 1. 【タイトル】を確実に抽出（隅付き括弧から取り出す）
+  const titleMatch = cleanText.match(/【([^】]+)】/);
+  if (titleMatch) {
+    title = titleMatch[1]
+      .replace(/^(タイトル|Title)\s*[:：-]?\s*/i, "")
+      .replace(/タイトル/g, "")
+      .replace(/[\[\]「」""]/g, "")
       .trim();
+    
+    // 抽出したタイトル部分（【...】）を本文から削除
+    cleanText = cleanText.replace(/【[^】]+】/, "").trim();
+  }
 
-    // 1行目が「名前: セリフ」の形式でない場合のみタイトルとみなす
-    if (cleanTitle && !rawTitle.includes(":")) {
-      title = cleanTitle;
+  let lines = cleanText.split("\n").map(l => l.trim());
+
+  // 2. 台本前の「前置き（AIの挨拶など）」の自動カット
+  // セリフの開始形式（「話者名:」または「話者名：」）を検知するまで先頭行を削除し続ける
+  while (lines.length > 0) {
+    const firstLine = lines[0];
+    if (firstLine === "") {
       lines.shift();
+      continue;
+    }
+    const isDialogue = /^[^\s:：]+[:：]/.test(firstLine);
+    if (!isDialogue) {
+      lines.shift(); // 前置きとみなして削除
+    } else {
+      break;
     }
   }
 
-  // 本文成形
-  let bodyText = lines.join("\n\n").replace(/\n{3,}/g, "\n\n");
+  // 3. 台本後の「後書き（AIの解説など）」の自動カット
+  // 末尾から、セリフ形式でも「もういいよ」でもない不要な解説文を削除
+  while (lines.length > 0) {
+    const lastLine = lines[lines.length - 1];
+    if (lastLine === "") {
+      lines.pop();
+      continue;
+    }
+    const isDialogue = /^[^\s:：]+[:：]/.test(lastLine) || lastLine.includes("もういいよ");
+    if (!isDialogue) {
+      lines.pop(); // 後書きとみなして削除
+    } else {
+      break;
+    }
+  }
 
-  // 話者コロンの正規化
+  // 4. 空行をリセットし、セリフ間の空行を「1行」に統一
+  let tempLines = lines.filter(l => l !== "");
+  let bodyText = tempLines.join("\n\n").replace(/\n{3,}/g, "\n\n");
+
+  // 5. コロンの半角コロン＋半角スペースへの正規化 (例: "A: セリフ")
+  // これによりアプリ側でのコロン分割（スプリット）やアイコン配置が100%安定します
   bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
 
   const outro = `${names[1] || "B"}: もういいよ！`;
 
-  // ★修正: 末尾に既に「もういいよ」がある場合は削除し、必ず1つだけ付与する
-  // trim()で末尾空白を除去し、最後の行が「もういいよ」で終わっていれば行ごと削除
+  // 6. 「もういいよ」の重複防止と最終オチの付与
   bodyText = bodyText.trim().replace(/(?:^|\n).*?もういいよ[！!]*$/g, "");
-
-  // 最後に正規のオチを付与
   bodyText = bodyText.trim() + "\n\n" + outro;
 
-  // 特殊文字排除
-  const cleanBody = bodyText.replace(/[\u2028\u2029]/g, "\n").replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
+  // 7. 特殊文字・無効な制御コード（アプリクラッシュの原因）の徹底排除
+  const cleanBody = bodyText
+    .replace(/[\u2028\u2029]/g, "\n")
+    .replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
+
   return { title, cleanBody };
 }
 
@@ -173,11 +205,11 @@ export default async function handler(req, res) {
     const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
-    // LLMに文字数の物理的なスケール感を理解させるための目安行数（1セリフ平均22文字と想定）
+    // LLMに文字数のスケール感を掴ませるための行数目安の自動計算
     const estimatedLines = Math.round(targetLen / 22);
     const estimatedTurns = Math.round(estimatedLines / 2);
 
-    // 3. 初回プロンプト（物理的な文字数の目安を追記）
+    // 3. 初回プロンプト（不要な装飾や挨拶の徹底排除を強調）
     const initialPrompt = `以下の指示と条件に従い、漫才台本を生成してください。
 
 題材: ${theme}
@@ -201,7 +233,7 @@ ${techniquesText}`;
     // 5. 【自己検証プロセス】文字数が範囲外なら修正（最大3回までループ処理）
     let currentLen = cleanBody.length;
     let attempt = 0;
-    const maxAttempts = 3; // 初回生成を含めて最大3回
+    const maxAttempts = 3;
 
     while ((currentLen < minLimit || currentLen > maxLimit) && attempt < maxAttempts - 1) {
       attempt++;
@@ -238,7 +270,7 @@ ${cleanBody}`;
         currentLen = cleanBody.length;
       } catch (e) {
         console.warn(`Retry generation attempt ${attempt} failed:`, e);
-        break; // ループを抜けて直前の安全な状態でレスポンスに進む
+        break;
       }
     }
 
@@ -251,11 +283,11 @@ ${cleanBody}`;
       });
     }
 
-    // 7. レスポンス
+    // 7. レスポンス (クライアントアプリ側が非常に扱いやすいシンプルなキーでも返却)
     return res.status(200).json({
       status: "success",
-      title: String(title),
-      body: cleanBody,
+      title: String(title),  // アプリ側では、この括弧なしのきれいなタイトルを表示してください。
+      body: cleanBody,       // アプリ側では、この前置き・後書きのないきれいな台本本文を表示してください。
       text: cleanBody,
       content: cleanBody,
       meta: {
