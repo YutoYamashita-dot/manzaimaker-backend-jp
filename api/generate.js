@@ -37,19 +37,49 @@ const GENERAL_DEFS = {
   TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。",
 };
 
-// 共通AI呼び出し関数（エラーハンドリング付き）
-async function callGemini(prompt, apiKey) {
+// 共通システム指示 (AIの役割と厳密なフォーマット規則を固定)
+const SYSTEM_INSTRUCTION = `あなたはプロの漫才作家です。指示に従い、指定された形式で爆笑できる漫才台本を日本語で作成または修正してください。
+
+■ 出力フォーマットの厳格なルール：
+1. 1行目は【タイトル】のみを出力してください。（例：【タイトルの名前】）※「タイトル: 」などの余計な記述やMarkdownの「#」は絶対に含めないでください。
+2. 2行目以降が本文（台本）となります。
+3. セリフの間には、必ず「1行の空白（空行）」を1つだけ入れてください。
+4. 話者とセリフは半角コロンまたは全角コロンで区切ってください。（例：A: 〜〜 または A：〜〜）
+5. 台本の最後は、ツッコミ側のセリフ「もういいよ！」で終わるようにしてください。
+6. Markdownの装飾記号（「#」や「**」、「\`\`\`」など）は、出力に一切含めないでください。プレーンテキストのみで出力してください。`;
+
+// 共通AI呼び出し関数（セーフティ設定およびシステム指示に対応）
+async function callGemini(prompt, systemInstruction, apiKey) {
   const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
   const model = "gemini-3.5-flash";
   const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
 
+  const requestBody = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { 
+      temperature: 0.7, 
+      maxOutputTokens: 4000 
+    },
+    // 漫才の特異な表現（激しいツッコミ、暴言風のボケなど）による誤検知を回避する
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+    ]
+  };
+
+  // systemInstructionが指定されていればリクエストボディに付与
+  if (systemInstruction) {
+    requestBody.systemInstruction = {
+      parts: [{ text: systemInstruction }]
+    };
+  }
+
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 4000 }
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!resp.ok) {
@@ -59,7 +89,14 @@ async function callGemini(prompt, apiKey) {
 
   const data = await resp.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  if (!text) throw new Error("AI返答が空です");
+  
+  if (!text) {
+    const finishReason = data?.candidates?.[0]?.finishReason;
+    if (finishReason) {
+      throw new Error(`AI返答が空です (理由: ${finishReason})`);
+    }
+    throw new Error("AI返答が空です");
+  }
   return text;
 }
 
@@ -136,23 +173,24 @@ export default async function handler(req, res) {
     const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
-    // 3. 初回プロンプト（文字数厳守を強調）
-    const initialPrompt = `プロの漫才作家として爆笑できる台本を日本語で作成してください。
+    // 3. 初回プロンプト（文字数厳守とプレーンテキストの出力を強調）
+    const initialPrompt = `以下の指示と条件に従い、漫才台本を生成してください。
+
 題材: ${theme}
 ジャンル: ${genre}
 条件:
 - 登場人物: ${names.join(", ")}
-- 【最重要】文字数: 必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
-- 形式: 1行目に【タイトル】、次に本文。セリフの間には必ず「1行の空白」のみを入れてください。
+- 【最重要】文字数制限: 台本の本文（タイトルや空白行を除く、セリフ部分の総文字数）は、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
 - 題材（${theme}）に関連した、ちょっとしたツカミ要素を入れること。
 - 題材（${theme}）をフリとして、多くの人が薄々知っている/思っているけどあえて口に出しては言わないことをボケやツッコミとして必ず複数回入れてください。
 - 題材（${theme}）に関連した、大喜利の回答のようなボケやツッコミを必ず複数回入れてください。
+- 演出上の指示（括弧書きなど）や、Markdownの装飾記号（#や**、\`\`\`等）は出力しないでください。プレーンテキストのみで出力してください。
 
-■採用する技法:
+■ 採用する技法:
 ${techniquesText}`;
 
     // 4. 初回AI生成
-    const rawText1 = await callGemini(initialPrompt, apiKey);
+    const rawText1 = await callGemini(initialPrompt, SYSTEM_INSTRUCTION, apiKey);
     let { title, cleanBody } = formatScript(rawText1, names);
 
     // 5. 【自己検証プロセス】文字数が範囲外なら修正（リトライ）
@@ -161,22 +199,24 @@ ${techniquesText}`;
     if (currentLen < minLimit || currentLen > maxLimit) {
       let fixInstruction = "";
       if (currentLen < minLimit) {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケを増やし、必ず${minLimit}文字以上にしてください。`;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケやセリフのやりとりを増やし、必ず${minLimit}文字以上にしてください。`;
       } else {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉を削って必ず${maxLimit}文字以下に要約してください。`;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉や長すぎるセリフを削って、必ず${maxLimit}文字以下に要約してください。`;
       }
 
-      const retryPrompt = `以下の漫才台本を修正してください。
+      const retryPrompt = `以下の現在の漫才台本を修正してください。
+
 【修正指示】: ${fixInstruction}
-- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は維持してください。
-- 技法はそのまま活かしてください。
+- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は厳格に維持してください。
+- 技法や題材はそのまま活かしてください。
+- Markdownなどの余計な装飾記号は一切加えないでください。
 
 【現在の台本】:
 【${title}】
 ${cleanBody}`;
 
       try {
-        const rawText2 = await callGemini(retryPrompt, apiKey);
+        const rawText2 = await callGemini(retryPrompt, SYSTEM_INSTRUCTION, apiKey);
         const res2 = formatScript(rawText2, names);
         if (res2.title && res2.title !== "無題の漫才") {
           title = res2.title;
