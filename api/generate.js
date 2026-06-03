@@ -1,322 +1,110 @@
 // api/generate.js
 export const config = { runtime: "nodejs" };
-
 import { createClient } from "@supabase/supabase-js";
 
-// Supabase設定
 const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY) : null;
 
-/* =========================
-技法 定義テーブル
-========================= */
-const BOKE_DEFS = {
-  IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
-  HIYU: "比喩ボケ：比喩で誇張してのボケ",
-  GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
-  GIJI_RONRI: "擬似論理ボケ：論理風だが中身がズレているボケ。",
-  TSUKKOMI_BOKE: "ツッコミの発言が次のボケの伏線になるボケ。",
-  RENSA: "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
-  KOTOBA_ASOBI: "言葉遊び：ダジャレ・韻などで言語的にふざける。",
-};
-
-const TSUKKOMI_DEFS = {
-  ODOROKI_GIMON: "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
-  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
-  OKORI: "怒りツッコミ：怒ったような言い方でのツッコミ。",
-  KYOKAN: "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
-  META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。",
-};
-
-const GENERAL_DEFS = {
-  SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
-  GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
-  TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
-  KANCHIGAI_TEISEI: "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
-  SURECHIGAI: "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
-  TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。",
-};
-
-// 共通システム指示 (ト書きや余計な解説の出力を強固に禁止)
-const SYSTEM_INSTRUCTION = `あなたはプロの漫才作家です。指定された「題材」を100%主軸とし、最初から最後までその題材について徹底的にボケてツッコみあう、爆笑できる漫才台本を日本語で作成または修正してください。
-テーマと関係のない不要な長文、世間話への脱線は絶対にしないでください。
-台本の「会話（発言）テキスト」以外のト書き（演出指示などの括弧書き）、技法名、文字数などの注釈は絶対に含めないでください。
-
-■ 出力フォーマットの厳格なルール：
-1. 1行目は【タイトル】のみを出力してください。（例：【タイトルの名前】）※「タイトル: 」などの余計な記述やMarkdownの「#」は絶対に含めないでください。
-2. 2行目以降が本文（台本）となります。
-3. セリフの間には、必ず「1行 of 空白（空行）」を1つだけ入れてください。
-4. 話者とセリフは半角コロンまたは全角コロンで区切ってください。（例：A: 〜〜 または A：〜〜）
-5. 台本の最後は、ツッコミ側のセリフ「もういいよ！」で終わるようにしてください。
-6. Markdownの装飾記号（「#」や「**」、「\`\`\`」など）は、出力に一切含めないでください。プレーンテキストのみで出力してください。`;
-
-// 共通AI呼び出し関数
-async function callGemini(prompt, systemInstruction, apiKey, maxTokens = 4000) {
-  const baseUrl = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
-  const model = "gemini-3.5-flash";
-  const url = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
-
-  const requestBody = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { 
-      temperature: 0.7, 
-      maxOutputTokens: maxTokens 
-    },
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-    ]
-  };
-
-  if (systemInstruction) {
-    requestBody.systemInstruction = {
-      parts: [{ text: systemInstruction }]
-    };
-  }
-
+// 共通AI呼び出し
+async function callGemini(prompt, apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2000 },
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" }
+      ]
+    })
   });
-
-  if (!resp.ok) {
-    const errData = await resp.json();
-    throw new Error(`Gemini API Error: ${JSON.stringify(errData)}`);
-  }
-
+  if (!resp.ok) throw new Error("API通信エラー");
   const data = await resp.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  
-  if (!text) {
-    const finishReason = data?.candidates?.[0]?.finishReason;
-    if (finishReason) {
-      throw new Error(`AI返答が空です (理由: ${finishReason})`);
-    }
-    throw new Error("AI返答が空です");
-  }
-  return text;
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-// テキスト整形関数 (不要なト書き・演出指示・技法解説・メタ注釈を完全に排除して純粋なテキストのみにクレンジング)
-function formatScript(rawText, names) {
-  let cleanText = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  let title = "無題の漫才";
+// シンプルな整形関数
+function formatScript(rawText) {
+  // 1. 無駄な改行やMarkdownの囲い(```)を消去
+  let text = rawText.replace(/```[a-z]*\n?/g, "").replace(/```/g, "").trim();
+  let lines = text.split("\n").map(l => l.trim()).filter(l => l !== "");
+  
+  if (lines.length === 0) return { title: "無題", body: "" };
 
-  // 1. 【タイトル】を確実に抽出
-  const titleMatch = cleanText.match(/【([^】]+)】/);
-  if (titleMatch) {
-    title = titleMatch[1]
-      .replace(/^(タイトル|Title)\s*[:：-]?\s*/i, "")
-      .replace(/タイトル/g, "")
-      .replace(/[\[\]「」""]/g, "")
-      .trim();
-    
-    // 抽出したタイトル部分（【...】）を本文から一旦削除
-    cleanText = cleanText.replace(/【[^】]+】/, "").trim();
-  }
+  // 2. 1行目をタイトルとして取得（記号を消す）
+  let title = lines[0].replace(/[【】「」#]/g, "").replace(/^タイトル[:：]/, "").trim();
+  
+  // 3. 2行目以降を本文とする。話者コロンを統一
+  let bodyLines = lines.slice(1)
+    .filter(l => !l.startsWith("（") && !l.startsWith("(")) // ト書き行を除去
+    .map(l => l.replace(/[:：]/, ": ")); // コロンを "A: セリフ" の形に
 
-  // 2. 本文から「テキストではないもの（ト書き・動作指示・技法解説タグ・AIの自己評価など）」を完全に除去
-  // 例: （笑い）、(立ち上がる)、（比喩ボケ）、【伏線回収】、[文字数: 350] などを強力に消去
-  cleanText = cleanText.replace(/[\(（\[【][^）\]】]*[\)）\]】]/g, "");
-
-  let lines = cleanText.split("\n").map(l => l.trim());
-
-  // 3. 台本前の「前置き（AIの余計な導入テキストなど）」の自動カット
-  // セリフの開始形式（「話者名:」または「話者名：」）を検知するまで先頭行を削除し続ける
-  while (lines.length > 0) {
-    const firstLine = lines[0];
-    if (firstLine === "") {
-      lines.shift();
-      continue;
-    }
-    const isDialogue = /^[^\s:：]+[:：]/.test(firstLine);
-    if (!isDialogue) {
-      lines.shift();
-    } else {
-      break;
-    }
-  }
-
-  // 4. 台本後の「後書き（AIの解説テキストなど）」の自動カット
-  // 末尾から、セリフ形式でも「もういいよ」でもない不要な解説文を削除
-  while (lines.length > 0) {
-    const lastLine = lines[lines.length - 1];
-    if (lastLine === "") {
-      lines.pop();
-      continue;
-    }
-    const isDialogue = /^[^\s:：]+[:：]/.test(lastLine) || lastLine.includes("もういいよ");
-    if (!isDialogue) {
-      lines.pop();
-    } else {
-      break;
-    }
-  }
-
-  // 5. 空行をリセットし、セリフ間の空行を「1行」に統一
-  let tempLines = lines.filter(l => l !== "");
-  let bodyText = tempLines.join("\n\n").replace(/\n{3,}/g, "\n\n");
-
-  // 6. コロンの半角コロン＋半角スペースへの正規化
-  bodyText = bodyText.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, "$1$2: ");
-
-  const outro = `${names[1] || "B"}: もういいよ！`;
-
-  // 7. 「もういいよ」の重複防止と最終オチの付与
-  bodyText = bodyText.trim().replace(/(?:^|\n).*?もういいよ[！!]*$/g, "");
-  bodyText = bodyText.trim() + "\n\n" + outro;
-
-  // 8. 特殊文字・無効な制御コードの徹底排除
-  const cleanBody = bodyText
-    .replace(/[\u2028\u2029]/g, "\n")
-    .replace(/[^\x20-\x7E\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\r]/g, "");
-
-  return { title, cleanBody };
+  let body = bodyLines.join("\n\n");
+  return { title, body };
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-
-  if (req.method !== "POST") return res.status(405).json({ error: "Method Not Allowed" });
-
-  const { theme, genre, characters, length, user_id, boke, tsukkomi, general } = req.body || {};
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  const { theme, genre, characters, length, user_id } = req.body;
   const names = (characters || "A,B").split(/[、,]/).map(s => s.trim());
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // 目標文字数設定
-  const targetLen = Number(length) || 350;
-  // ★上下10%の厳格な範囲設定
-  const minLimit = Math.floor(targetLen * 0.9);
-  const maxLimit = Math.floor(targetLen * 1.1);
-
-  // 目標文字数から動的にAI出力トークン上限を算出
-  const maxTokens = Math.min(4000, Math.max(300, Math.ceil(maxLimit * 1.8) + 150));
+  const min = Math.floor(length * 0.9);
+  const max = Math.floor(length * 1.1);
 
   try {
-    // 1. クレジットチェック
+    // クレジットチェック
     let used = 0, paid = 0;
     if (supabase && user_id) {
       const { data } = await supabase.from("user_usage").select("output_count, paid_credits").eq("user_id", user_id).maybeSingle();
       used = data?.output_count ?? 0;
       paid = data?.paid_credits ?? 0;
-      if (used >= 500 && paid <= 0) return res.status(403).json({ error: "クレジット不足" });
     }
 
-    // 2. 技法プロンプト作成
-    const selB = (boke || []).map(k => BOKE_DEFS[k]).filter(Boolean);
-    const selT = (tsukkomi || []).map(k => TSUKKOMI_DEFS[k]).filter(Boolean);
-    const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
-    const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
+    // プロンプト作成（シンプルかつ強力に）
+    const prompt = `漫才作家として「${theme}」を題材にした${genre}漫才を作ってください。
+以下のルールを厳守してください：
+1. 1行目：【タイトル】
+2. 2行目以降：漫才のセリフ（「名前: セリフ」の形式）
+3. 最後に「もういいよ！」で終わる。
+4. 全体の総文字数を必ず「${min}文字〜${max}文字」にする。
+5. 余計な挨拶、解説、ト書き（かっこ書き）は一切書かない。
 
-    // 行数目安の自動計算
-    const estimatedLines = Math.round(targetLen / 22);
-    const estimatedTurns = Math.round(estimatedLines / 2);
+登場人物：${names.join(", ")}`;
 
-    // 3. 初回プロンプト (テキストではないものの出力禁止を徹底指示)
-    const initialPrompt = `以下の指示と条件に従い、漫才台本を生成してください。
+    let raw = await callGemini(prompt, apiKey);
+    let result = formatScript(raw);
 
-題材: ${theme}
-ジャンル: ${genre}
-条件:
-- 【最重要】テーマ（${theme}）の主軸化: 漫才のツカミ、本編、そしてオチに至るまで、完全に「${theme}」について終始議論したり、勘違いしたり、熱く語り合ったりする構成にしてください。無関係な話題に脱線することは絶対に避けてください。
-- 登場人物: ${names.join(", ")}
-- 【最重要】文字数制限: タイトルや「話者名:」、「空白行」、「オチのもういいよ！」を含めた【出力するテキスト全体の総文字数】を、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
-- 【分量の目安】: 合計で約 ${estimatedLines} 行（登場人物同士のセリフが約 ${estimatedTurns} 往復。1つのセリフあたり平均 15〜25 文字程度）で構成すると、ちょうど目標文字数に収まります。
-- 【禁止】: ト書き（演出指示・動作指示などの括弧書き：例「（笑い）」「（驚く）」など）、採用した技法名、文字数カウントなどの【台本セリフ（会話）以外のテキスト】は絶対に含めないでください。
-- 題材（${theme}）に関連した、ちょっとしたツカミ要素を入れること。
-- 題材（${theme}）をフリとして、多くの人が薄々知っている/思っているけどあえて口に出しては言わないこと（あるあるや矛盾、共通認識など）をボケやツッコミとして必ず複数回入れてください。
-- 題材（${theme}）に関連した、大喜利の回答のようなボケやツッコミを必ず複数回入れてください。
-- 演出上の指示（括弧書きなど）や、Markdownの装飾記号（#や**、\`\`\`等）は出力しないでください。プレーンテキストのみで出力してください。
-
-■ 採用する技法:
-${techniquesText}`;
-
-    // 4. 初回AI生成
-    const rawText1 = await callGemini(initialPrompt, SYSTEM_INSTRUCTION, apiKey, maxTokens);
-    let { title, cleanBody } = formatScript(rawText1, names);
-
-    // 5. 【自己検証プロセス】文字数が範囲外なら修正（最大3回までループ処理）
-    let currentLen = cleanBody.length;
-    let attempt = 0;
-    const maxAttempts = 3;
-
-    while ((currentLen < minLimit || currentLen > maxLimit) && attempt < maxAttempts - 1) {
-      attempt++;
-      let fixInstruction = "";
-      
-      if (currentLen < minLimit) {
-        const diff = targetLen - currentLen;
-        fixInstruction = `現在の総文字数は ${currentLen}文字 で、目標の「${minLimit}〜${maxLimit}文字（中央値 ${targetLen}文字）」に対して少なすぎます。
-あと約 ${diff}文字 ほど内容を増やす必要があります。
-【具体的な修正方法】: 題材「${theme}」に沿った、ボケとツッコミのセリフのラリーを「2〜3往復分追加」し、全体のボリュームを増やしてください。ト書き（括弧書き）は絶対に含めないでください。`;
-      } else {
-        const diff = currentLen - targetLen;
-        fixInstruction = `現在の総文字数は ${currentLen}文字 で、目標の「${minLimit}〜${maxLimit}文字（中央値 ${targetLen}文字）」に対して多すぎます。
-約 ${diff}文字 ほど長すぎます。
-【具体的な修正方法】: 題材「${theme}」と関係のない不要なやりとり、または冗長な長いセリフを「2〜3往復分ごっそり削って」簡潔に要約し、全体のボリュームを大きく減らしてください。ト書き（括弧書き）は絶対に含めないでください。`;
-      }
-
-      const retryPrompt = `以下の現在の漫才台本を指示通りに修正してください。
-
-【修正指示】: ${fixInstruction}
-- 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は厳格に維持してください。
-- 題材（${theme}）についての漫才であることを絶対に崩さず、技法をそのまま活かしてください。
-- ト書き（演出・動作指示などの括弧書き：例「（驚く）」など）は絶対に含めず、純粋な台詞テキストのみで構成してください。
-- Markdownなどの余計な装飾記号は一切加えないでください。
-
-【現在の台本】:
-【${title}】
-${cleanBody}`;
-
-      try {
-        const rawTextRetry = await callGemini(retryPrompt, SYSTEM_INSTRUCTION, apiKey, maxTokens + 100);
-        const resRetry = formatScript(rawTextRetry, names);
-        if (resRetry.title && resRetry.title !== "無題の漫才") {
-          title = resRetry.title;
-        }
-        cleanBody = resRetry.cleanBody;
-        currentLen = cleanBody.length;
-      } catch (e) {
-        console.warn(`Retry generation attempt ${attempt} failed:`, e);
-        break;
-      }
+    // 文字数が大幅に違う場合のみ1回だけリトライ
+    if (result.body.length < min || result.body.length > max) {
+      const retryPrompt = `以下の漫才を、内容は変えず「${min}〜${max}文字」になるように調整して出力し直してください。現在${result.body.length}文字です。解説は不要です。\n\n${raw}`;
+      raw = await callGemini(retryPrompt, apiKey);
+      result = formatScript(raw);
     }
 
-    // 6. DB更新（成功時のみ消費）
+    // DB更新
     if (supabase && user_id) {
-      used += 1;
-      if (used > 500 && paid > 0) paid -= 1;
       await supabase.from("user_usage").upsert({
-        user_id, output_count: used, paid_credits: paid, updated_at: new Date().toISOString()
+        user_id, output_count: used + 1, updated_at: new Date().toISOString()
       });
     }
 
-    // 7. レスポンス
+    // レスポンス
     return res.status(200).json({
       status: "success",
-      title: String(title),
-      body: cleanBody,
-      text: cleanBody,
-      content: cleanBody,
+      title: result.title,
+      body: result.body,
+      text: result.body, // 互換性のため
       meta: {
-        structure: selG.length ? selG : ["導入", "展開", "オチ"],
-        techniques: [...selB, ...selT].length ? [...selB, ...selT] : ["ボケ", "ツッコミ"],
-        usage_count: Math.floor(used),
-        paid_credits: Math.floor(paid),
-        actual_length: cleanBody.length,
-        target_length: targetLen
+        actual_length: result.body.length,
+        target_length: length
       }
     });
+
   } catch (err) {
-    console.error("Handler Error:", err.message);
-    return res.status(500).json({
-      status: "error",
-      title: "エラー",
-      body: "ネタの生成に失敗しました。時間をおいて試してください。",
-      meta: { usage_count: 0, paid_credits: 0 }
-    });
+    console.error(err);
+    return res.status(500).json({ status: "error", body: "生成に失敗しました。" });
   }
 }
