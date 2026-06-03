@@ -30,7 +30,7 @@ const TSUKKOMI_DEFS = {
 
 const GENERAL_DEFS = {
   SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
-  GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
+  GYAKUHARI: "逆張り構成：期待・常飾を外して予想を逆手に取る。",
   TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
   KANCHIGAI_TEISEI: "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
   SURECHIGAI: "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
@@ -173,14 +173,19 @@ export default async function handler(req, res) {
     const selG = (general || []).map(k => GENERAL_DEFS[k]).filter(Boolean);
     const techniquesText = [...selB, ...selT, ...selG].map(t => `・${t}`).join("\n") || "・比喩表現で例える\n・伏線を回収する";
 
-    // 3. 初回プロンプト（文字数厳守とプレーンテキストの出力を強調）
+    // LLMに文字数の物理的なスケール感を理解させるための目安行数（1セリフ平均22文字と想定）
+    const estimatedLines = Math.round(targetLen / 22);
+    const estimatedTurns = Math.round(estimatedLines / 2);
+
+    // 3. 初回プロンプト（物理的な文字数の目安を追記）
     const initialPrompt = `以下の指示と条件に従い、漫才台本を生成してください。
 
 題材: ${theme}
 ジャンル: ${genre}
 条件:
 - 登場人物: ${names.join(", ")}
-- 【最重要】文字数制限: 台本の本文（タイトルや空白行を除く、セリフ部分の総文字数）は、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
+- 【最重要】文字数制限: 台本本文（タイトルや空白行を除く、セリフ部分の総文字数）は、必ず「${minLimit}文字以上、${maxLimit}文字以下」に収めてください。これより短くても長くてもいけません。
+- 【分量の目安】: 合計で約 ${estimatedLines} 行（登場人物同士のセリフが約 ${estimatedTurns} 往復。1つのセリフあたり平均 15〜25 文字程度）で構成すると、ちょうど目標文字数に収まりやすくなります。
 - 題材（${theme}）に関連した、ちょっとしたツカミ要素を入れること。
 - 題材（${theme}）をフリとして、多くの人が薄々知っている/思っているけどあえて口に出しては言わないことをボケやツッコミとして必ず複数回入れてください。
 - 題材（${theme}）に関連した、大喜利の回答のようなボケやツッコミを必ず複数回入れてください。
@@ -193,18 +198,26 @@ ${techniquesText}`;
     const rawText1 = await callGemini(initialPrompt, SYSTEM_INSTRUCTION, apiKey);
     let { title, cleanBody } = formatScript(rawText1, names);
 
-    // 5. 【自己検証プロセス】文字数が範囲外なら修正（リトライ）
-    const currentLen = cleanBody.length;
+    // 5. 【自己検証プロセス】文字数が範囲外なら修正（最大3回までループ処理）
+    let currentLen = cleanBody.length;
+    let attempt = 0;
+    const maxAttempts = 3; // 初回生成を含めて最大3回
 
-    if (currentLen < minLimit || currentLen > maxLimit) {
+    while ((currentLen < minLimit || currentLen > maxLimit) && attempt < maxAttempts - 1) {
+      attempt++;
       let fixInstruction = "";
+      
       if (currentLen < minLimit) {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より短すぎます。内容を膨らませて、ボケやセリフのやりとりを増やし、必ず${minLimit}文字以上にしてください。`;
+        const diff = targetLen - currentLen;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字 / 中央値 ${targetLen}文字）に対して少なすぎます。
+あと約 ${diff}文字 ほど内容が不足しています。現在のストーリー展開や設定は壊さず、ボケのやりとりを2〜3往復分追加して内容を肉付けし、必ず ${minLimit}文字以上 にしてください。`;
       } else {
-        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字）より長すぎます。内容は変えず、無駄な言葉や長すぎるセリフを削って、必ず${maxLimit}文字以下に要約してください。`;
+        const diff = currentLen - targetLen;
+        fixInstruction = `現在の文字数は ${currentLen}文字 で、目標（${minLimit}〜${maxLimit}文字 / 中央値 ${targetLen}文字）に対して多すぎます。
+約 ${diff}文字 ほど長すぎます。話の筋道や面白いボケは変えないまま、冗長なセリフ表現を削り、不要な「あの〜」「えっと」などのつなぎ言葉を取り除くかセリフを圧縮して、必ず ${maxLimit}文字以下 にしてください。`;
       }
 
-      const retryPrompt = `以下の現在の漫才台本を修正してください。
+      const retryPrompt = `以下の現在の漫才台本を指示通りに修正してください。
 
 【修正指示】: ${fixInstruction}
 - 形式（タイトル行、セリフ間の空行、最後の「もういいよ！」）は厳格に維持してください。
@@ -216,14 +229,16 @@ ${techniquesText}`;
 ${cleanBody}`;
 
       try {
-        const rawText2 = await callGemini(retryPrompt, SYSTEM_INSTRUCTION, apiKey);
-        const res2 = formatScript(rawText2, names);
-        if (res2.title && res2.title !== "無題の漫才") {
-          title = res2.title;
+        const rawTextRetry = await callGemini(retryPrompt, SYSTEM_INSTRUCTION, apiKey);
+        const resRetry = formatScript(rawTextRetry, names);
+        if (resRetry.title && resRetry.title !== "無題の漫才") {
+          title = resRetry.title;
         }
-        cleanBody = res2.cleanBody;
+        cleanBody = resRetry.cleanBody;
+        currentLen = cleanBody.length;
       } catch (e) {
-        console.warn("Retry generation failed:", e);
+        console.warn(`Retry generation attempt ${attempt} failed:`, e);
+        break; // ループを抜けて直前の安全な状態でレスポンスに進む
       }
     }
 
