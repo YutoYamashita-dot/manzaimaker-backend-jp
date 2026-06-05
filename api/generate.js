@@ -371,11 +371,12 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     }
   }
 
-  const targetLen = Math.min(Number(length) || 350, 2000);
+  // ★ タイムアウト対策：iOS側の指定に関わらず、サーバー側の上限を最大「1000文字」に厳しく制限してタイムアウトを防ぎます
+  const targetLen = Math.min(Number(length) || 350, 1000);
   
-  // ★修正: 指定文字数を「下限」にする（ユーザーは指定量以上を期待するため）
+  // 指定文字数を「下限」にする
   const minLen = targetLen;
-  const maxLen = Math.ceil(targetLen * 1.25); // 上限は少し余裕を持たせる
+  const maxLen = Math.ceil(targetLen * 1.25); // 上限
   
   const minLines = Math.max(12, Math.ceil(minLen / 35));
 
@@ -445,7 +446,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- まず頭の中で、与えられた条件（題材、ジャンル、登場人物、文字数）をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
     "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見源にする。",
     "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
-    "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き重したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
+    "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
     "",
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
@@ -554,7 +555,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
 
-// デフォルトモデル（環境変数があればそれを優先）
+// デフォルトモデル（環境変数があればそれを優先。生成速度の観点から高速な1.5/2.5-flashをデフォルトにします）
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
 
 // OpenAI 互換の client.chat.completions.create をエミュレートするクライアント
