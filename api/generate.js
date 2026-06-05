@@ -1,5 +1,3 @@
-Manzai-backend-jp gemini3 iPhoneで動かない版
-
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
 // 必須: XAI_API_KEY / DEEPSEEK_API_KEY
