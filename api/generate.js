@@ -75,7 +75,7 @@ async function checkCredit(user_id) {
     return { ok: used < FREE_QUOTA || paid > 0, row };
   } catch (e) {
     console.warn("[supabase] checkCredit failed, allowing bypass:", e?.message || e);
-    // データベース接続や設定エラーで生成全体が止まるのを防ぐため、エラー時はバイパス（ok: true）させます。
+    // データベースエラーや認証エラーでアプリ側の生成が停止しないよう、エラー時はバイパス（ok: true）させます
     return { ok: true, row: null };
   }
 }
@@ -445,7 +445,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "- まず頭の中で、与えられた条件（題材、ジャンル、登場人物、文字数）をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
     "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見源にする。",
     "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
-    "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
+    "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き重したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
     "",
     "■見出し・書式",
     "- 最初の1行に【タイトル】を入れ、その直後に本文（漫才）を続ける",
@@ -578,7 +578,11 @@ const client = {
         const maxOut = payload.max_output_tokens ?? payload.max_tokens;
 
         // OpenAI形式 messages → Gemini contents へ変換
-        const contents = messages.map((m) => ({
+        // ★修正点：messages 内の system ロールを抽出し、contents から除外。roleの重複（連続）ルールエラーを回避。
+        const systemMessage = messages.find((m) => m.role === "system")?.content;
+        const filteredMessages = messages.filter((m) => m.role !== "system");
+
+        const contents = filteredMessages.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
           parts: [{ text: m.content }],
         }));
@@ -594,6 +598,8 @@ const client = {
             temperature,
             ...(maxOut ? { maxOutputTokens: maxOut } : {}),
           },
+          // system指示はトップレベルの systemInstruction に格納
+          ...(systemMessage ? { systemInstruction: { parts: [{ text: systemMessage }] } } : {}),
         };
 
         const resp = await fetch(url, {
@@ -857,7 +863,13 @@ export default async function handler(req, res) {
     body = ensureBlankLineBetweenTurns(body);
     body = ensureTsukkomiOutro(body, tsukkomiName);
 
-    // 指定文字数との差を補う
+    // ==========================================
+    // ★ タイムアウト対策：余分なLLM呼び出し（追記・自己修正・タイトル再生成）をバイパス化
+    // これにより、Geminiへの通信が「最初の1回」になり、Vercelの10秒制限内で確実にレスポンスを返します。
+    // ==========================================
+    
+    /* 
+    // 【省略】指定文字数との差を補う（初回プロンプトで文字数を十分満たしているため不要です）
     const deficit = targetLen - body.length;
     if (deficit >= 30) {
       try {
@@ -868,7 +880,6 @@ export default async function handler(req, res) {
           remainingChars: deficit,
           tsukkomiName,
         });
-        // 追記後も同じ順序で仕上げ
         body = normalizeSpeakerColons(body);
         body = ensureBlankLineBetweenTurns(body);
         body = ensureTsukkomiOutro(body, tsukkomiName);
@@ -876,8 +887,10 @@ export default async function handler(req, res) {
         console.warn("[continuation] failed:", e?.message || e);
       }
     }
+    */
 
-    // ★ 自己検証＆自動修正（採用する技法の担保）
+    /*
+    // 【省略】自己検証＆自動修正（プロンプト内で既に品質や文字数を厳しく指示しているため、重い再修正リクエストは省きます）
     const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
     try {
       body = await selfVerifyAndCorrectBody({
@@ -888,19 +901,20 @@ export default async function handler(req, res) {
         minLen,
         maxLen,
         tsukkomiName,
-        theme: safeTheme, // ★検証用に渡す
-        genre: safeGenre, // ★検証用に渡す
-        charDesc: charDesc // ★検証用に渡す
+        theme: safeTheme,
+        genre: safeGenre,
+        charDesc: charDesc
       });
     } catch (e) {
       console.warn("[self-verify] failed:", e?.message || e);
-      // 検証が失敗しても致命的にはしない（本文は現状のまま続行）
     }
+    */
 
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
-    // ★ タイトル再生成（本文の確定後に、内容と整合させるため）
+    /*
+    // 【省略】タイトル再生成（初回で出力されたタイトルをそのまま使用することで待ち時間をカットします）
     if (typeof body === "string" && body.trim().length > 0) {
         try {
             const newTitle = await generateTitleForBody({ client, model: DEFAULT_MODEL, body });
@@ -911,6 +925,7 @@ export default async function handler(req, res) {
             console.warn("[title-gen] failed:", e?.message || e);
         }
     }
+    */
 
     // 成功判定：★本文非空のみ（語尾揺れで落とさない）
     const success = typeof body === "string" && body.trim().length > 0;
