@@ -68,10 +68,16 @@ async function setUsageRow(user_id, { output_count, paid_credits }) {
 /** 生成前：残高チェックのみ（消費しない） */
 async function checkCredit(user_id) {
   if (!hasSupabase || !user_id) return { ok: true, row: null };
-  const row = await getUsageRow(user_id);
-  const used = row.output_count ?? 0;
-  const paid = row.paid_credits ?? 0;
-  return { ok: used < FREE_QUOTA || paid > 0, row };
+  try {
+    const row = await getUsageRow(user_id);
+    const used = row.output_count ?? 0;
+    const paid = row.paid_credits ?? 0;
+    return { ok: used < FREE_QUOTA || paid > 0, row };
+  } catch (e) {
+    console.warn("[supabase] checkCredit failed, allowing bypass:", e?.message || e);
+    // データベース接続や設定エラーで生成全体が止まるのを防ぐため、エラー時はバイパス（ok: true）させます。
+    return { ok: true, row: null };
+  }
 }
 
 /** 生成成功後：ここで初めて消費（無料→有料の順）
