@@ -1,3 +1,5 @@
+Manzai-backend-jp gemini3 iPhoneで動かない版
+
 // api/generate.js
 // Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
 // 必須: XAI_API_KEY / DEEPSEEK_API_KEY
@@ -68,16 +70,10 @@ async function setUsageRow(user_id, { output_count, paid_credits }) {
 /** 生成前：残高チェックのみ（消費しない） */
 async function checkCredit(user_id) {
   if (!hasSupabase || !user_id) return { ok: true, row: null };
-  try {
-    const row = await getUsageRow(user_id);
-    const used = row.output_count ?? 0;
-    const paid = row.paid_credits ?? 0;
-    return { ok: used < FREE_QUOTA || paid > 0, row };
-  } catch (e) {
-    console.warn("[supabase] checkCredit failed, allowing bypass:", e?.message || e);
-    // データベースエラーや認証エラーでアプリ側の生成が停止しないよう、エラー時はバイパス（ok: true）させます
-    return { ok: true, row: null };
-  }
+  const row = await getUsageRow(user_id);
+  const used = row.output_count ?? 0;
+  const paid = row.paid_credits ?? 0;
+  return { ok: used < FREE_QUOTA || paid > 0, row };
 }
 
 /** 生成成功後：ここで初めて消費（無料→有料の順）
@@ -371,12 +367,11 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     }
   }
 
-  // ★ タイムアウト対策：iOS側の指定に関わらず、サーバー側の上限を最大「1000文字」に厳しく制限してタイムアウトを防ぎます
-  const targetLen = Math.min(Number(length) || 350, 1000);
+  const targetLen = Math.min(Number(length) || 350, 2000);
   
-  // 指定文字数を「下限」にする
+  // ★修正: 指定文字数を「下限」にする（ユーザーは指定量以上を期待するため）
   const minLen = targetLen;
-  const maxLen = Math.ceil(targetLen * 1.25); // 上限
+  const maxLen = Math.ceil(targetLen * 1.25); // 上限は少し余裕を持たせる
   
   const minLines = Math.max(12, Math.ceil(minLen / 35));
 
@@ -444,7 +439,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
     "",
     "■自己改稿プロセス（60点→100点）",
     "- まず頭の中で、与えられた条件（題材、ジャンル、登場人物、文字数）をもとに「だいたい60点くらい」の漫才台本を1本作る（※この60点版は出力しない）。",
-    "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見源にする。",
+    "- 次に、その60点の台本を観客目線で自己採点し、「指定された題材から逸れていないか」「文字数は足りているか」を具体的に見直す。",
     "- フロントで選択された技法（採用する技法）が、ボケ・ツッコミの掛け合いの中で十分に活かされているかを確認する。",
     "- 最後に、弱い部分を修正・強化し、『100点を目指した完成版』に書き直したものだけを最終出力として返す（途中の60点版や解説は絶対に出力しない）。",
     "",
@@ -555,7 +550,7 @@ async function generateContinuation({ client, model, baseBody, remainingChars, t
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta";
 
-// デフォルトモデル（環境変数があればそれを優先。生成速度の観点から高速な1.5/2.5-flashをデフォルトにします）
+// デフォルトモデル（環境変数があればそれを優先）
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
 
 // OpenAI 互換の client.chat.completions.create をエミュレートするクライアント
@@ -579,11 +574,7 @@ const client = {
         const maxOut = payload.max_output_tokens ?? payload.max_tokens;
 
         // OpenAI形式 messages → Gemini contents へ変換
-        // ★修正点：messages 内の system ロールを抽出し、contents から除外。roleの重複（連続）ルールエラーを回避。
-        const systemMessage = messages.find((m) => m.role === "system")?.content;
-        const filteredMessages = messages.filter((m) => m.role !== "system");
-
-        const contents = filteredMessages.map((m) => ({
+        const contents = messages.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
           parts: [{ text: m.content }],
         }));
@@ -599,8 +590,6 @@ const client = {
             temperature,
             ...(maxOut ? { maxOutputTokens: maxOut } : {}),
           },
-          // system指示はトップレベルの systemInstruction に格納
-          ...(systemMessage ? { systemInstruction: { parts: [{ text: systemMessage }] } } : {}),
         };
 
         const resp = await fetch(url, {
@@ -727,8 +716,8 @@ async function selfVerifyAndCorrectBody({ client, model, body, requiredTechs = [
   // 仕上げ整形（順序固定）
   revised = normalizeSpeakerColons(revised);
   revised = ensureBlankLineBetweenTurns(revised);
-  revised = enforceCharLimit(revised, minLen, maxLen, false);
   revised = ensureTsukkomiOutro(revised, tsukkomiName);
+  revised = enforceCharLimit(revised, minLen, maxLen, false);
 
   return revised;
 }
@@ -747,7 +736,7 @@ async function generateTitleForBody({ client, model, body }) {
   ].join("\n");
 
   const messages = [
-    { role: "system", content: "あなたは優秀な漫才作家です。" },
+    { role: "system", content: "あなたは優秀な放送作家です。" },
     { role: "user", content: prompt }
   ];
 
@@ -864,13 +853,7 @@ export default async function handler(req, res) {
     body = ensureBlankLineBetweenTurns(body);
     body = ensureTsukkomiOutro(body, tsukkomiName);
 
-    // ==========================================
-    // ★ タイムアウト対策：余分なLLM呼び出し（追記・自己修正・タイトル再生成）をバイパス化
-    // これにより、Geminiへの通信が「最初の1回」になり、Vercelの10秒制限内で確実にレスポンスを返します。
-    // ==========================================
-    
-    /* 
-    // 【省略】指定文字数との差を補う（初回プロンプトで文字数を十分満たしているため不要です）
+    // 指定文字数との差を補う
     const deficit = targetLen - body.length;
     if (deficit >= 30) {
       try {
@@ -881,6 +864,7 @@ export default async function handler(req, res) {
           remainingChars: deficit,
           tsukkomiName,
         });
+        // 追記後も同じ順序で仕上げ
         body = normalizeSpeakerColons(body);
         body = ensureBlankLineBetweenTurns(body);
         body = ensureTsukkomiOutro(body, tsukkomiName);
@@ -888,10 +872,8 @@ export default async function handler(req, res) {
         console.warn("[continuation] failed:", e?.message || e);
       }
     }
-    */
 
-    /*
-    // 【省略】自己検証＆自動修正（プロンプト内で既に品質や文字数を厳しく指示しているため、重い再修正リクエストは省きます）
+    // ★ 自己検証＆自動修正（採用する技法の担保）
     const requiredForCheck = Array.isArray(techniquesForMeta) ? techniquesForMeta : [];
     try {
       body = await selfVerifyAndCorrectBody({
@@ -902,20 +884,19 @@ export default async function handler(req, res) {
         minLen,
         maxLen,
         tsukkomiName,
-        theme: safeTheme,
-        genre: safeGenre,
-        charDesc: charDesc
+        theme: safeTheme, // ★検証用に渡す
+        genre: safeGenre, // ★検証用に渡す
+        charDesc: charDesc // ★検証用に渡す
       });
     } catch (e) {
       console.warn("[self-verify] failed:", e?.message || e);
+      // 検証が失敗しても致命的にはしない（本文は現状のまま続行）
     }
-    */
 
     // ★ 最終レンジ調整：上下10%の範囲に収める（allowOverflow=false）
     body = enforceCharLimit(body, minLen, maxLen, false);
 
-    /*
-    // 【省略】タイトル再生成（初回で出力されたタイトルをそのまま使用することで待ち時間をカットします）
+    // ★ タイトル再生成（本文の確定後に、内容と整合させるため）
     if (typeof body === "string" && body.trim().length > 0) {
         try {
             const newTitle = await generateTitleForBody({ client, model: DEFAULT_MODEL, body });
@@ -926,7 +907,6 @@ export default async function handler(req, res) {
             console.warn("[title-gen] failed:", e?.message || e);
         }
     }
-    */
 
     // 成功判定：★本文非空のみ（語尾揺れで落とさない）
     const success = typeof body === "string" && body.trim().length > 0;
@@ -999,3 +979,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Server Error", detail: e });
   }
 }
+
