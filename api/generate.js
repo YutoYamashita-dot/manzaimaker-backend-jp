@@ -1487,7 +1487,7 @@ const OPENAI_API_KEY =
 
 const OPENAI_MODEL =
   process.env.OPENAI_MODEL ||
-  "gpt-6-astra";
+  "gpt-6-sol";
 
 
 const openai =
