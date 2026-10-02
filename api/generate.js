@@ -196,19 +196,33 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
 /* =========================
    6) OpenAI 呼び出し
    ========================= */
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PREFERRED_MODEL = process.env.OPENAI_MODEL || "gpt-6-sol";
 const FALLBACK_MODEL = "gpt-6-luna";
 
 async function createWithFallback(payloadBase) {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
   try {
-    return await openai.chat.completions.create({ ...payloadBase, model: PREFERRED_MODEL });
+    return await openai.responses.create({
+      model: PREFERRED_MODEL,
+      input: payloadBase.input,
+      temperature: payloadBase.temperature,
+      max_output_tokens: payloadBase.max_output_tokens,
+    });
   } catch (e) {
     console.warn(
       `[generate] primary model failed (${PREFERRED_MODEL}). Fallback to ${FALLBACK_MODEL}.`,
       e?.message || e
     );
-    return await openai.chat.completions.create({ ...payloadBase, model: FALLBACK_MODEL });
+
+    return await openai.responses.create({
+      model: FALLBACK_MODEL,
+      input: payloadBase.input,
+      temperature: payloadBase.temperature,
+      max_output_tokens: payloadBase.max_output_tokens,
+    });
   }
 }
 
@@ -236,21 +250,24 @@ export default async function handler(req, res) {
     });
 
     const payloadBase = {
-      messages: [
+      input: [
         {
           role: "system",
           content:
             "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。メタ説明は禁止。禁止語:『緊張』『緩和』。",
         },
-        { role: "user", content: prompt },
+        {
+          role: "user",
+          content: prompt,
+        },
       ],
       temperature: 0.8,
-      max_tokens: 1400,
+      max_output_tokens: 1400,
     };
 
     const completion = await createWithFallback(payloadBase);
 
-    let text = completion?.choices?.[0]?.message?.content?.trim() || "（ネタの生成に失敗しました）";
+    let text = completion?.output_text?.trim() || "（ネタの生成に失敗しました）";
     const finalText = enforceCharLimit(text, maxLen);
 
     return res.status(200).json({
@@ -261,9 +278,11 @@ export default async function handler(req, res) {
       },
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Server Error" });
+    console.error("[generate] OpenAI/API error:", err);
+
+    return res.status(500).json({
+      error: "Server Error",
+      message: err?.message || "Unknown error",
+    });
   }
 }
-
-
