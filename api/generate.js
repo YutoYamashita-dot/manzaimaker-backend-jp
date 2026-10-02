@@ -1,20 +1,7 @@
-// api/generate.js
-
-// Vercel Node.js (ESM)。本文と「タイトル」を日本語で返す（台本のみ）
-
-// 必須: OPENAI_API_KEY
-// 任意: OPENAI_MODEL
-// 追加: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
-// （ある場合、user_id の回数/クレジットを保存）
-
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
-
-/* =========================
-Supabase Client
-========================= */
 
 const SUPABASE_URL =
   process.env.SUPABASE_URL || "";
@@ -27,15 +14,24 @@ const hasSupabase =
 
 const supabase =
   hasSupabase
-    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    ? createClient(
+        SUPABASE_URL,
+        SUPABASE_KEY
+      )
     : null;
 
+
 /* =========================
-既存互換ユーティリティ（そのまま維持）
+Supabase / Credit
 ========================= */
 
-async function incrementUsage(user_id, delta = 1) {
-  if (!hasSupabase || !user_id) return null;
+async function incrementUsage(
+  user_id,
+  delta = 1
+) {
+  if (!hasSupabase || !user_id) {
+    return null;
+  }
 
   try {
     const { data, error } =
@@ -45,13 +41,16 @@ async function incrementUsage(user_id, delta = 1) {
         .eq("user_id", user_id)
         .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
     const current =
       data?.output_count ?? 0;
 
     const next =
-      current + Math.max(delta, 0);
+      current +
+      Math.max(delta, 0);
 
     const { error: upErr } =
       await supabase
@@ -59,13 +58,18 @@ async function incrementUsage(user_id, delta = 1) {
         .upsert({
           user_id,
           output_count: next,
-          updated_at: new Date().toISOString()
+          updated_at:
+            new Date().toISOString()
         });
 
-    if (upErr) throw upErr;
+    if (upErr) {
+      throw upErr;
+    }
 
     return next;
+
   } catch (e) {
+
     console.warn(
       "[supabase] incrementUsage failed:",
       e?.message || e
@@ -75,12 +79,16 @@ async function incrementUsage(user_id, delta = 1) {
   }
 }
 
-/* === ★ 課金ユーティリティ（後払い消費：失敗時は絶対に減らさない） === */
 
 const FREE_QUOTA = 500;
 
+
 async function getUsageRow(user_id) {
-  if (!hasSupabase || !user_id) {
+
+  if (
+    !hasSupabase ||
+    !user_id
+  ) {
     return {
       output_count: 0,
       paid_credits: 0
@@ -90,23 +98,39 @@ async function getUsageRow(user_id) {
   const { data, error } =
     await supabase
       .from("user_usage")
-      .select("output_count, paid_credits")
+      .select(
+        "output_count, paid_credits"
+      )
       .eq("user_id", user_id)
       .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 
-  return data || {
-    output_count: 0,
-    paid_credits: 0
-  };
+  return (
+    data || {
+      output_count: 0,
+      paid_credits: 0
+    }
+  );
 }
+
 
 async function setUsageRow(
   user_id,
-  { output_count, paid_credits }
+  {
+    output_count,
+    paid_credits
+  }
 ) {
-  if (!hasSupabase || !user_id) return;
+
+  if (
+    !hasSupabase ||
+    !user_id
+  ) {
+    return;
+  }
 
   const { error } =
     await supabase
@@ -115,16 +139,24 @@ async function setUsageRow(
         user_id,
         output_count,
         paid_credits,
-        updated_at: new Date().toISOString()
+        updated_at:
+          new Date().toISOString()
       });
 
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 }
 
-/** 生成前：残高チェックのみ（消費しない） */
 
-async function checkCredit(user_id) {
-  if (!hasSupabase || !user_id) {
+async function checkCredit(
+  user_id
+) {
+
+  if (
+    !hasSupabase ||
+    !user_id
+  ) {
     return {
       ok: true,
       row: null
@@ -132,7 +164,9 @@ async function checkCredit(user_id) {
   }
 
   const row =
-    await getUsageRow(user_id);
+    await getUsageRow(
+      user_id
+    );
 
   const used =
     row.output_count ?? 0;
@@ -144,27 +178,31 @@ async function checkCredit(user_id) {
     ok:
       used < FREE_QUOTA ||
       paid > 0,
+
     row
   };
 }
 
-/**
- * 生成成功後：ここで初めて消費（無料→有料の順）
- *
- * エラーが起きても絶対に throw せず、
- * クレジット減少が原因でレスポンスが失敗しないようにする
- */
 
-async function consumeAfterSuccess(user_id) {
-  if (!hasSupabase || !user_id) {
+async function consumeAfterSuccess(
+  user_id
+) {
+
+  if (
+    !hasSupabase ||
+    !user_id
+  ) {
     return {
       consumed: null
     };
   }
 
   try {
+
     const row =
-      await getUsageRow(user_id);
+      await getUsageRow(
+        user_id
+      );
 
     const used =
       row.output_count ?? 0;
@@ -172,34 +210,54 @@ async function consumeAfterSuccess(user_id) {
     const paid =
       row.paid_credits ?? 0;
 
-    if (used < FREE_QUOTA) {
-      await setUsageRow(user_id, {
-        output_count: used + 1,
-        paid_credits: paid
-      });
+
+    if (
+      used < FREE_QUOTA
+    ) {
+
+      await setUsageRow(
+        user_id,
+        {
+          output_count:
+            used + 1,
+
+          paid_credits:
+            paid
+        }
+      );
 
       return {
-        consumed: "free"
+        consumed:
+          "free"
       };
     }
+
 
     if (paid > 0) {
-      await setUsageRow(user_id, {
-        output_count: used + 1,
-        paid_credits: paid - 1
-      });
+
+      await setUsageRow(
+        user_id,
+        {
+          output_count:
+            used + 1,
+
+          paid_credits:
+            paid - 1
+        }
+      );
 
       return {
-        consumed: "paid"
+        consumed:
+          "paid"
       };
     }
+
 
     return {
       consumed: null
     };
+
   } catch (e) {
-    // ここでエラーになっても「生成自体は成功している」のに
-    // 500を返さないようにする。
 
     console.warn(
       "[supabase] consumeAfterSuccess failed, credits NOT decremented:",
@@ -208,60 +266,87 @@ async function consumeAfterSuccess(user_id) {
 
     return {
       consumed: null,
-      error: e?.message || String(e)
+      error:
+        e?.message ||
+        String(e)
     };
   }
 }
 
-/* === ★ 追加：購入反映ユーティリティ（credit_100 のみ 100 回付与） === */
 
 const ALLOWED_PRODUCT_ID =
   "credit_100";
 
-const CREDIT_100_AMOUNT = 100;
+const CREDIT_100_AMOUNT =
+  100;
+
 
 async function addCreditsForPurchase(
   user_id,
   product_id
 ) {
-  if (!hasSupabase || !user_id) {
+
+  if (
+    !hasSupabase ||
+    !user_id
+  ) {
     throw new Error(
       "Supabase not configured or user_id missing"
     );
   }
 
-  if (product_id !== ALLOWED_PRODUCT_ID) {
+
+  if (
+    product_id !==
+    ALLOWED_PRODUCT_ID
+  ) {
+
     const err =
-      new Error("Unsupported product_id");
+      new Error(
+        "Unsupported product_id"
+      );
 
     err.status = 400;
 
     throw err;
   }
 
+
   const row =
-    await getUsageRow(user_id);
+    await getUsageRow(
+      user_id
+    );
 
   const paid =
     row.paid_credits ?? 0;
 
   const nextPaid =
-    paid + CREDIT_100_AMOUNT;
+    paid +
+    CREDIT_100_AMOUNT;
 
-  await setUsageRow(user_id, {
-    output_count:
-      row.output_count ?? 0,
-    paid_credits: nextPaid
-  });
+
+  await setUsageRow(
+    user_id,
+    {
+      output_count:
+        row.output_count ?? 0,
+
+      paid_credits:
+        nextPaid
+    }
+  );
+
 
   return nextPaid;
 }
 
+
 /* =========================
-1. 技法 定義テーブル（削除せず維持）
+技法定義
 ========================= */
 
 const BOKE_DEFS = {
+
   IIMACHIGAI:
     "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
 
@@ -282,9 +367,12 @@ const BOKE_DEFS = {
 
   KOTOBA_ASOBI:
     "言葉遊び：ダジャレ・韻などで言語的にふざける。"
+
 };
 
+
 const TSUKKOMI_DEFS = {
+
   ODOROKI_GIMON:
     "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
 
@@ -299,9 +387,12 @@ const TSUKKOMI_DEFS = {
 
   META:
     "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
+
 };
 
+
 const GENERAL_DEFS = {
+
   SANDAN_OCHI:
     "三段オチ：1・2をフリ、3で意外なオチ。",
 
@@ -319,16 +410,16 @@ const GENERAL_DEFS = {
 
   TACHIBA_GYAKUTEN:
     "立場逆転：途中または終盤で役割・地位がひっくり返る。"
+
 };
 
-/* =========================
-2) 旧仕様：ランダム技法（維持）
-========================= */
 
 const MUST_HAVE_TECH =
   "比喩ツッコミ";
 
+
 function pickTechniquesWithMetaphor() {
+
   const pool = [
     "風刺",
     "皮肉",
@@ -339,22 +430,33 @@ function pickTechniquesWithMetaphor() {
     "具体例の誇張"
   ];
 
+
   const shuffled =
     [...pool].sort(
-      () => Math.random() - 0.5
+      () =>
+        Math.random() -
+        0.5
     );
 
+
   const extraCount =
-    Math.floor(Math.random() * 3) + 1;
+    Math.floor(
+      Math.random() * 3
+    ) + 1;
+
 
   return [
     MUST_HAVE_TECH,
-    ...shuffled.slice(0, extraCount)
+    ...shuffled.slice(
+      0,
+      extraCount
+    )
   ];
 }
 
+
 /* =========================
-3) 文字数の最終調整
+文字数
 ========================= */
 
 function enforceCharLimit(
@@ -363,21 +465,37 @@ function enforceCharLimit(
   maxLen,
   allowOverflow = false
 ) {
-  if (!text) return "";
+
+  if (!text) {
+    return "";
+  }
+
 
   let t =
     text
       .trim()
-      .replace(/```[\s\S]*?```/g, "")
-      .replace(/^#{1,6}\s.*$/gm, "")
+      .replace(
+        /```[\s\S]*?```/g,
+        ""
+      )
+      .replace(
+        /^#{1,6}\s.*$/gm,
+        ""
+      )
       .trim();
+
 
   if (
     !allowOverflow &&
     t.length > maxLen
   ) {
+
     const softCut =
-      t.lastIndexOf("\n", maxLen);
+      t.lastIndexOf(
+        "\n",
+        maxLen
+      );
+
 
     const softPuncs = [
       "。",
@@ -387,12 +505,18 @@ function enforceCharLimit(
       "♪"
     ];
 
+
     const softPuncCut =
       Math.max(
         ...softPuncs.map(
-          (p) => t.lastIndexOf(p, maxLen)
+          (p) =>
+            t.lastIndexOf(
+              p,
+              maxLen
+            )
         )
       );
+
 
     let cutPos =
       Math.max(
@@ -400,17 +524,31 @@ function enforceCharLimit(
         softCut
       );
 
-    if (cutPos < maxLen * 0.9) {
+
+    if (
+      cutPos <
+      maxLen * 0.9
+    ) {
       cutPos = maxLen;
     }
 
-    t =
-      t.slice(0, cutPos).trim();
 
-    if (!/[。！？…♪]$/.test(t)) {
+    t =
+      t
+        .slice(
+          0,
+          cutPos
+        )
+        .trim();
+
+
+    if (
+      !/[。！？…♪]$/.test(t)
+    ) {
       t += "。";
     }
   }
+
 
   if (
     t.length < minLen &&
@@ -419,61 +557,97 @@ function enforceCharLimit(
     t += "。";
   }
 
+
   return t;
 }
 
+
 /* =========================
-3.5) 最終行の強制付与（修正：重複防止を強化）
+最後のツッコミ
 ========================= */
 
 function ensureTsukkomiOutro(
   text,
   tsukkomiName = "B"
 ) {
+
   const outro =
     `${tsukkomiName}: もういいよ！`;
 
-  if (!text) return outro;
 
-  let t = text.trim();
+  if (!text) {
+    return outro;
+  }
 
-  // 文末にすでに「もういいよ（！）」がある場合、
-  // AIが書いたものとシステムが付与するものが
-  // 重複しないよう、末尾の「もういいよ」系を削除する。
+
+  let t =
+    text.trim();
+
 
   const endPattern =
     /(?:^|\n)(?:[^:\n]+:\s*)?もういいよ[！!]*\s*$/;
 
-  while (endPattern.test(t)) {
+
+  while (
+    endPattern.test(t)
+  ) {
+
     t =
-      t.replace(
-        endPattern,
-        ""
-      ).trim();
+      t
+        .replace(
+          endPattern,
+          ""
+        )
+        .trim();
   }
 
-  return t + "\n" + outro;
+
+  return (
+    t +
+    "\n" +
+    outro
+  );
 }
 
-/* 行頭の「名前：/名前:」を「名前: 」に正規化 */
 
-function normalizeSpeakerColons(s) {
+/* =========================
+話者表記
+========================= */
+
+function normalizeSpeakerColons(
+  s
+) {
+
   return s.replace(
     /(^|\n)([^\n:：]+)[：:]\s*/g,
-    (_m, head, name) =>
+    (
+      _m,
+      head,
+      name
+    ) =>
       `${head}${name}: `
   );
 }
 
-/* 台詞間を1行空ける（重複空行は圧縮） */
 
-function ensureBlankLineBetweenTurns(text) {
+/* =========================
+台詞間の空行
+========================= */
+
+function ensureBlankLineBetweenTurns(
+  text
+) {
+
   const lines =
     text.split("\n");
 
   const compressed = [];
 
-  for (const ln of lines) {
+
+  for (
+    const ln of lines
+  ) {
+
     if (
       ln.trim() === "" &&
       compressed.length &&
@@ -484,28 +658,36 @@ function ensureBlankLineBetweenTurns(text) {
       continue;
     }
 
+
     compressed.push(ln);
   }
 
+
   const out = [];
+
 
   for (
     let i = 0;
-    i < compressed.length;
+    i <
+      compressed.length;
     i++
   ) {
+
     const cur =
       compressed[i];
 
     out.push(cur);
+
 
     const isTurn =
       /^[^:\n：]+:\s/.test(
         cur.trim()
       );
 
+
     const next =
       compressed[i + 1];
+
 
     const nextIsTurn =
       next != null &&
@@ -513,50 +695,80 @@ function ensureBlankLineBetweenTurns(text) {
         next?.trim() || ""
       );
 
+
     if (
       isTurn &&
       nextIsTurn
     ) {
+
       if (
         cur.trim() !== "" &&
         (next || "").trim() !== ""
       ) {
+
         out.push("");
       }
     }
   }
 
+
   return out
     .join("\n")
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(
+      /\n{3,}/g,
+      "\n\n"
+    );
 }
 
+
 /* =========================
-3.6) タイトル/本文の分割
+タイトル分離
 ========================= */
 
-function splitTitleAndBody(s) {
+function splitTitleAndBody(
+  s
+) {
+
   if (!s) {
+
     return {
       title: "",
       body: ""
     };
   }
 
+
   const parts =
-    s.split(/\r?\n\r?\n/, 2);
+    s.split(
+      /\r?\n\r?\n/,
+      2
+    );
+
 
   const rawTitle =
-    (parts[0] || "").trim();
+    (
+      parts[0] ||
+      ""
+    ).trim();
 
-  // 先頭の「【」と最初の「】」を削除
+
   const title =
     rawTitle
-      .replace(/^【/, "")
-      .replace(/】/, "");
+      .replace(
+        /^【/,
+        ""
+      )
+      .replace(
+        /】/,
+        "");
+
 
   const body =
-    (parts[1] ?? s).trim();
+    (
+      parts[1] ??
+      s
+    ).trim();
+
 
   return {
     title,
@@ -564,17 +776,25 @@ function splitTitleAndBody(s) {
   };
 }
 
-/* === ★ 3.7) 「タイトルは必ず1つだけ」化
-本文先頭の重複タイトル除去 & 必要なら抽出
-=== */
+
+/* =========================
+タイトル正規化
+========================= */
 
 function normalizeTitleString(
   str = ""
 ) {
+
   return String(str)
     .trim()
-    .replace(/^【/, "")
-    .replace(/】/, "")
+    .replace(
+      /^【/,
+      ""
+    )
+    .replace(
+      /】/,
+      ""
+    )
     .replace(
       /^(タイトル|Title)\s*[:：】]?\s*/i,
       ""
@@ -583,40 +803,53 @@ function normalizeTitleString(
       /^#{1,6}\s*/,
       ""
     )
-    .replace(/\s+/g, " ");
+    .replace(
+      /\s+/g,
+      " "
+    );
 }
+
 
 function ensureSingleTitle(
   titleIn,
   bodyIn
 ) {
+
   let title =
     normalizeTitleString(
       titleIn || ""
     );
 
+
   let body =
     (bodyIn || "")
-      .replace(/\r\n/g, "\n");
+      .replace(
+        /\r\n/g,
+        "\n"
+      );
+
 
   let lines =
     body.split("\n");
+
 
   while (
     lines.length &&
     lines[0].trim() === ""
   ) {
+
     lines.shift();
   }
 
-  // 既存タイトルが無い場合、
-  // 本文先頭が見出しならタイトルとして抽出
+
   if (
     !title &&
     lines.length
   ) {
+
     const first =
       lines[0].trim();
+
 
     if (
       first.startsWith("#") ||
@@ -625,10 +858,15 @@ function ensureSingleTitle(
         first
       )
     ) {
+
       title =
-        normalizeTitleString(first);
+        normalizeTitleString(
+          first
+        );
+
 
       lines.shift();
+
 
       while (
         lines.length &&
@@ -639,20 +877,27 @@ function ensureSingleTitle(
     }
   }
 
-  // 既存タイトルがある場合、
-  // 本文先頭の同義タイトル行を除去
+
   if (
     title &&
     lines.length
   ) {
+
     const normTitle =
-      normalizeTitleString(title);
+      normalizeTitleString(
+        title
+      );
+
 
     const first =
       lines[0].trim();
 
+
     const firstNorm =
-      normalizeTitleString(first);
+      normalizeTitleString(
+        first
+      );
+
 
     if (
       first.startsWith("#") ||
@@ -663,7 +908,9 @@ function ensureSingleTitle(
       firstNorm.toLowerCase() ===
         normTitle.toLowerCase()
     ) {
+
       lines.shift();
+
 
       while (
         lines.length &&
@@ -672,19 +919,27 @@ function ensureSingleTitle(
         lines.shift();
       }
 
-      title = normTitle;
+
+      title =
+        normTitle;
     }
   }
 
+
   return {
+
     title:
-      title || "（タイトル未設定）",
-    body: lines.join("\n")
+      title ||
+      "（タイトル未設定）",
+
+    body:
+      lines.join("\n")
   };
 }
 
+
 /* =========================
-4) ガイドライン生成
+ガイドライン
 ========================= */
 
 function buildGuidelineFromSelections({
@@ -692,58 +947,87 @@ function buildGuidelineFromSelections({
   tsukkomi = [],
   general = []
 }) {
+
   const bokeLines =
     boke
-      .filter((k) => BOKE_DEFS[k])
+      .filter(
+        (k) =>
+          BOKE_DEFS[k]
+      )
       .map(
         (k) =>
           `- ${BOKE_DEFS[k]}`
       );
 
+
   const tsukkomiLines =
     tsukkomi
-      .filter((k) => TSUKKOMI_DEFS[k])
+      .filter(
+        (k) =>
+          TSUKKOMI_DEFS[k]
+      )
       .map(
         (k) =>
           `- ${TSUKKOMI_DEFS[k]}`
       );
 
+
   const generalLines =
     general
-      .filter((k) => GENERAL_DEFS[k])
+      .filter(
+        (k) =>
+          GENERAL_DEFS[k]
+      )
       .map(
         (k) =>
           `- ${GENERAL_DEFS[k]}`
       );
 
+
   const parts = [];
 
-  if (bokeLines.length) {
+
+  if (
+    bokeLines.length
+  ) {
+
     parts.push(
       "【ボケ技法】",
       ...bokeLines
     );
   }
 
-  if (tsukkomiLines.length) {
+
+  if (
+    tsukkomiLines.length
+  ) {
+
     parts.push(
       "【ツッコミ技法】",
       ...tsukkomiLines
     );
   }
 
-  if (generalLines.length) {
+
+  if (
+    generalLines.length
+  ) {
+
     parts.push(
       "【全般の構成技法】",
       ...generalLines
     );
   }
 
-  return parts.join("\n");
+
+  return parts.join(
+    "\n"
+  );
 }
 
+
 /* =========================
-5) プロンプト生成
+技法ラベル
 ========================= */
 
 function labelizeSelected({
@@ -751,37 +1035,291 @@ function labelizeSelected({
   tsukkomi = [],
   general = []
 }) {
+
   const toLabel =
-    (ids, table) =>
+    (
+      ids,
+      table
+    ) =>
       ids
-        .filter((k) => table[k])
-        .map((k) =>
-          table[k].split("」")[0]
+        .filter(
+          (k) =>
+            table[k]
         )
-        .map((s) =>
-          s.replace(/^.*?：?/, "")
+        .map(
+          (k) =>
+            table[k].split(
+              "」"
+            )[0]
+        )
+        .map(
+          (s) =>
+            s.replace(
+              /^.*?：?/,
+              ""
+            )
         );
 
+
   return {
-    boke: toLabel(
-      boke,
-      BOKE_DEFS
-    ),
 
-    tsukkomi: toLabel(
-      tsukkomi,
-      TSUKKOMI_DEFS
-    ),
+    boke:
+      toLabel(
+        boke,
+        BOKE_DEFS
+      ),
 
-    general: toLabel(
-      general,
-      GENERAL_DEFS
-    )
+    tsukkomi:
+      toLabel(
+        tsukkomi,
+        TSUKKOMI_DEFS
+      ),
+
+    general:
+      toLabel(
+        general,
+        GENERAL_DEFS
+      )
   };
 }
+
+
 /* =========================
-5.5) 本文の自己検証＆自動修正パス
-（不足技法があれば追記/修正）
+プロンプト
+========================= */
+
+function buildPrompt({
+  theme = "",
+  genre = "",
+  characters = "",
+  length = 1000,
+  selected = {}
+}) {
+
+  const boke =
+    Array.isArray(
+      selected.boke
+    )
+      ? selected.boke
+      : [];
+
+
+  const tsukkomi =
+    Array.isArray(
+      selected.tsukkomi
+    )
+      ? selected.tsukkomi
+      : [];
+
+
+  const general =
+    Array.isArray(
+      selected.general
+    )
+      ? selected.general
+      : [];
+
+
+  const selectedLabels =
+    labelizeSelected({
+      boke,
+      tsukkomi,
+      general
+    });
+
+
+  const guideline =
+    buildGuidelineFromSelections({
+      boke,
+      tsukkomi,
+      general
+    });
+
+
+  const techniquesForMeta = [
+
+    ...selectedLabels.boke,
+
+    ...selectedLabels.tsukkomi,
+
+    ...selectedLabels.general
+
+  ];
+
+
+  const structureMeta =
+    [
+      ...selectedLabels.general
+    ];
+
+
+  const safeTheme =
+    String(
+      theme || ""
+    ).trim() ||
+    "日常生活";
+
+
+  const safeGenre =
+    String(
+      genre || ""
+    ).trim() ||
+    "漫才";
+
+
+  const charDesc =
+    typeof characters ===
+      "string"
+
+      ? characters.trim()
+
+      : JSON.stringify(
+          characters ??
+          ""
+        );
+
+
+  const targetLen =
+    Number.isFinite(
+      Number(length)
+    ) &&
+    Number(length) > 0
+
+      ? Math.floor(
+          Number(length)
+        )
+
+      : 1000;
+
+
+  const minLen =
+    Math.max(
+      1,
+      Math.floor(
+        targetLen * 0.9
+      )
+    );
+
+
+  const maxLen =
+    Math.max(
+      minLen,
+      Math.ceil(
+        targetLen * 1.1
+      )
+    );
+
+
+  const tsukkomiName =
+    "B";
+
+
+  const techniqueText =
+    techniquesForMeta.length
+
+      ? techniquesForMeta.join(
+          "、"
+        )
+
+      : "指定なし";
+
+
+  const prompt = [
+
+    "以下の条件で、日本語の漫才台本を1本作成してください。",
+
+    "",
+
+    `【題材】${safeTheme}`,
+
+    `【ジャンル】${safeGenre}`,
+
+    `【登場人物】${charDesc || "A: ボケ、B: ツッコミ"}`,
+
+    `【目標文字数】${targetLen}文字`,
+
+    `【許容文字数】${minLen}〜${maxLen}文字程度`,
+
+    "",
+
+    "【採用する技法】",
+
+    techniqueText,
+
+    "",
+
+    guideline
+      ? "【技法ガイドライン】\n" +
+        guideline
+      : "",
+
+    "",
+
+    "【出力ルール】",
+
+    "- タイトルを最初に1つだけ出す。",
+
+    "- タイトルと本文の間には空行を1つ入れる。",
+
+    "- 本文は「名前: セリフ」の形式にする。",
+
+    "- 各台詞の間には空行を1つ入れる。",
+
+    "- 解説、分析、制作意図、技法名の説明は出力しない。",
+
+    "- 技法名そのものを台詞にしない。",
+
+    `- 最後は必ず ${tsukkomiName}: もういいよ！ で締める。`,
+
+    "- 固有名詞や具体的な数字を使い、抽象的な表現を避ける。",
+
+    "- 舞台でそのまま使える自然な掛け合いにする。",
+
+    "",
+
+    "【最終チェック】",
+
+    "- 題材が台本全体の中心になっているか。",
+
+    "- 登場人物の性格と役割が一貫しているか。",
+
+    "- 採用した技法が自然に台詞や展開へ反映されているか。",
+
+    "- 導入→展開→オチが成立しているか。",
+
+    `- 最後の ${tsukkomiName}: もういいよ！ は1回だけ。`
+
+  ].join("\n");
+
+
+  return {
+
+    prompt,
+
+    techniquesForMeta,
+
+    structureMeta,
+
+    maxLen,
+
+    minLen,
+
+    tsukkomiName,
+
+    targetLen,
+
+    safeTheme,
+
+    safeGenre,
+
+    charDesc
+
+  };
+}
+
+
+/* =========================
+続き生成
 ========================= */
 
 async function generateContinuation({
@@ -791,18 +1329,21 @@ async function generateContinuation({
   remainingChars,
   tsukkomiName
 }) {
+
   let seed =
     baseBody
       .replace(
         new RegExp(
-          `${tsukkomiName}: もういいよ！\\s*$`
+          `${tsukkomiName}: もういいよ!\\s*$`
         ),
         ""
       )
       .trim();
 
+
   const contPrompt = [
-    "以下は途中まで書かれた漫才の本文です。これを“そのまま続けてください”。",
+
+    "以下は途中まで書かれた漫才の本文です。これをそのまま続けてください。",
 
     "・タイトルは出さない",
 
@@ -814,47 +1355,29 @@ async function generateContinuation({
 
     "・台詞同士の間には必ず空行を1つ挟む",
 
-    "・自己検証時は《TAG:要素名》の一時タグ法を内部で使って良いが、出力直前に必ず全削除すること（タグを残さない）",
+    "・一時タグは出力に残さない",
 
     "",
 
-    // ▼▼▼ 最終チェックリスト ▼▼▼
+    "■最終チェック",
 
-    "■最終出力前に必ずこのチェックリストを頭の中で確認：",
+    "- 題材から逸れない。",
 
-    "- これまでの文脈にある『題材』から逸れずに展開しているか？",
+    "- 採用する技法を自然に使う。",
 
-    "- すべての「採用する技法」を1回以上使ったか？",
+    "- 意外性と納得感の両方を作る。",
 
-    "- 「意外性」があるが「納得感」のある笑える表現を使っているか？",
+    "- 導入→展開→オチを成立させる。",
 
-    "- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？",
+    `- 文字数は ${remainingChars}文字以上を目安にする。`,
 
-    "- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？",
+    "- 各台詞は「名前: セリフ」形式。",
 
-    "- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？",
+    `- 最後は ${tsukkomiName}: もういいよ！ の行で終える。`,
 
-    `- 文字数は ${remainingChars}文字以上を目安に自然に展開すること。`,
+    "- 固有名詞や具体的な数字を使う。",
 
-    "- 各台詞は「名前: セリフ」形式か？",
-
-    `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
-
-    "- タイトルと本文の間には空行があるか？",
-
-    "- 現実的なネタにしているか？",
-
-    // ★具体性
-    "- 【超重要】「固有名詞」や「具体的な数字」を必ず使うこと。「美味しい店」ではなく「サイゼリヤ」、「高い」ではなく「35年ローン」など、映像が浮かぶ具体的な言葉選びをすること。",
-
-    "- 抽象的な表現（あれ、それ、あること、面白いこと）は禁止。",
-
-    // ★性格
-    "- 各キャラクターは、設定された「性格」に基づいた口調・思考回路を徹底すること。",
-
-    "- 性格の不一致から生まれる「話の通じなさ」を笑いにすること。",
-
-    "→ 1つでもNoなら、即座に修正してから出力。",
+    "- 抽象的な表現を避ける。",
 
     "",
 
@@ -868,17 +1391,23 @@ async function generateContinuation({
   const messages = [
 
     {
-      role: "system",
+
+      role:
+        "system",
 
       content:
-        "あなたは実力派の漫才師コンビです。本文の“続き”だけを出力してください。"
+        "あなたは実力派の漫才師コンビです。本文の続きだけを出力してください。"
+
     },
 
     {
-      role: "user",
+
+      role:
+        "user",
 
       content:
         contPrompt
+
     }
 
   ];
@@ -896,22 +1425,20 @@ async function generateContinuation({
     );
 
 
-  /*
-   * GPT-6 Astra対応
-   *
-   * temperature は送信しない。
-   */
   const resp =
-    await client.chat.completions.create({
+    await client
+      .chat
+      .completions
+      .create({
 
-      model,
+        model,
 
-      messages,
+        messages,
 
-      max_output_tokens:
-        approxTok
+        max_output_tokens:
+          approxTok
 
-    });
+      });
 
 
   let cont =
@@ -919,7 +1446,8 @@ async function generateContinuation({
       ?.choices?.[0]
       ?.message
       ?.content
-      ?.trim() || "";
+      ?.trim() ||
+    "";
 
 
   cont =
@@ -950,53 +1478,29 @@ async function generateContinuation({
 
 
 /* =========================
-6) OpenAI GPT-6 Astra
-   Responses API ラッパー
+OpenAI
 ========================= */
 
-/*
- * OpenAI APIキーはVercelの環境変数から取得。
- *
- * Android / iPhone側にはAPIキーを入れない。
- */
-
 const OPENAI_API_KEY =
-  process.env.OPENAI_API_KEY || "";
+  process.env.OPENAI_API_KEY ||
+  "";
 
-
-/*
- * VercelのOPENAI_MODELが設定されていれば
- * それを優先。
- *
- * 未設定の場合はGPT-6 Astraを使用。
- */
 
 const OPENAI_MODEL =
   process.env.OPENAI_MODEL ||
   "gpt-6-astra";
 
 
-/*
- * OpenAIクライアント
- */
-
 const openai =
   OPENAI_API_KEY
+
     ? new OpenAI({
         apiKey:
           OPENAI_API_KEY
       })
+
     : null;
 
-
-/*
- * 既存コードとの互換性を維持するため、
- *
- * client.chat.completions.create(...)
- *
- * の形式を残しつつ、
- * 内部ではResponses APIを使用する。
- */
 
 const client = {
 
@@ -1004,7 +1508,9 @@ const client = {
 
     completions: {
 
-      async create(payload) {
+      async create(
+        payload
+      ) {
 
         if (!openai) {
 
@@ -1013,7 +1519,8 @@ const client = {
               "OPENAI_API_KEY is not set"
             );
 
-          err.status = 500;
+          err.status =
+            500;
 
           throw err;
         }
@@ -1032,26 +1539,27 @@ const client = {
             : [];
 
 
-        /*
-         * Chat Completions形式の
-         * messagesをResponses APIの
-         * input形式へ変換。
-         */
-
         const input =
           messages.map(
             (m) => ({
 
               role:
-                m.role === "assistant"
+                m.role ===
+                "assistant"
+
                   ? "assistant"
-                  : m.role === "system"
+
+                  : m.role ===
+                    "system"
+
                     ? "system"
+
                     : "user",
 
               content:
                 String(
-                  m.content ?? ""
+                  m.content ??
+                  ""
                 )
 
             })
@@ -1059,7 +1567,7 @@ const client = {
 
 
         const maxOutputTokens =
-          payload.max_output_tokens ;
+          payload.max_output_tokens;
 
 
         const request = {
@@ -1070,35 +1578,24 @@ const client = {
 
           ...(maxOutputTokens
             ? {
+
                 max_output_tokens:
                   maxOutputTokens
+
               }
+
             : {})
 
         };
 
 
-        /*
-         * 重要：
-         *
-         * GPT-6 Astraでは
-         * temperatureを送信しない。
-         */
-
         const response =
-          await openai.responses.create(
-            request
-          );
+          await openai
+            .responses
+            .create(
+              request
+            );
 
-
-        /*
-         * 既存コードが
-         *
-         * response.choices[0]
-         *
-         * を読む仕様なので、
-         * 互換形式に変換して返す。
-         */
 
         return {
 
@@ -1123,21 +1620,19 @@ const client = {
           ]
 
         };
-
       }
-
     }
-
   }
-
 };
 
 
 /* =========================
-失敗理由の整形
+Error
 ========================= */
 
-function normalizeError(err) {
+function normalizeError(
+  err
+) {
 
   return {
 
@@ -1158,66 +1653,88 @@ function normalizeError(err) {
     stack:
       process.env.NODE_ENV ===
       "production"
+
         ? undefined
+
         : err?.stack
 
   };
-
 }
+
+
+/* =========================
+自己検証
+========================= */
+
+async function selfVerifyAndCorrectBody({
+
+  client,
+
+  model,
+
+  body,
+
+  requiredTechs = [],
+
+  minLen,
+
+  maxLen,
+
+  tsukkomiName = "B",
+
+  theme = "",
+
+  genre = "",
+
+  charDesc = ""
+
+}) {
+
+  if (
+    !body ||
+    !String(body).trim()
+  ) {
+
+    return "";
+  }
+
+
   const checklist = [
-    "■最終出力前に必ずこのチェックリストを頭の中で確認：",
 
-    `- 指定された題材「${theme}」が、漫才全体の中心テーマになっているか？（単語が出るだけでなく、内容そのものが${theme}の話になっているか？ 別の話題にすり替わっていないか？ 逸れている場合は全文書き直してでも${theme}に戻すこと）`,
+    "■最終出力前に必ず確認すること：",
 
-    `- 指定されたジャンル「${genre}」に沿っているか？`,
+    `- 指定された題材「${theme}」が台本全体の中心になっているか。`,
 
-    `- 指定された登場人物「${charDesc}」の性格設定を守っているか？`,
+    `- 指定されたジャンル「${genre}」に沿っているか。`,
 
-    `- すべての「採用する技法」を1回以上使ったか？（採用する技法: ${requiredTechs.join("、") || "（指定なし）"}）`,
+    `- 指定された登場人物「${charDesc}」の性格設定を守っているか。`,
 
-    `- フロントで選択された技法（採用する技法）が、ボケとツッコミの掛け合いの中で具体的な台詞・展開として使われているか？`,
+    `- 採用する技法をできるだけ具体的な台詞・展開として使っているか。`,
 
-    `- 「意外性」があるが「納得感」のある笑える表現を使っているか？`,
+    `- 採用技法: ${requiredTechs.join("、") || "指定なし"}`,
 
-    `- ボケやツッコミの表現は、多少ヒヤヒヤしても危険ではなく、最終的に安心感や納得感につながっているか？`,
+    "- 意外性と納得感の両方があるか。",
 
-    `- フリ（導入）→ 伏線回収 → 最後は明確な「オチ」という全体の構成になっているか？`,
+    "- 導入→展開→オチの流れが成立しているか。",
 
-    `- 途中で展開破壊はあれど、全体として「一貫した話の漫才」となっているか？`,
+    `- 本文は${minLen}〜${maxLen}文字程度か。`,
 
-    `- 表現により「緊張感」がある状態とそれが「緩和」する状態があるか？`,
+    "- 各台詞は「名前: セリフ」形式か。",
 
-    `- 文字数は必ず ${minLen}文字以上 あるか？（不足している場合は加筆修正して伸ばすこと。${minLen}文字未満は許可されない）`,
+    `- 最後は ${tsukkomiName}: もういいよ！ で終わっているか。`,
 
-    `- 各台詞は「名前: セリフ」形式か？`,
-
-    `- 最後は ${tsukkomiName}: もういいよ！ の行で終わっており、この行が本文中で1回だけになっているか？`,
-
-    `- 現実的なネタにしているか？`,
-
-    "- タイトルと本文の間には必ず空行があるか？",
-
-    "- ボケの言葉選びは一般的すぎないか？（もっと具体的な単語に直せないか？）",
-
-    "- ツッコミは単なる「説明」になっていないか？（ボケの異常さを嘆く、呆れる、強く否定する等の「感情」が乗っているか？）",
-
-    "- 台本全体を通して、読み手が『フフッ』と笑えるポイントが3箇以上のポイントがあるか？",
-
-    "- 本文に『皮肉』『風刺』『緊張』『緩和』『伏線』『比喩』という語を一切含めないこと（英字・同義語例: irony, satire, tension, release, foreshadowing, metaphor も不可）。該当語がある場合は別表現に必ず置換してから出力すること。",
-
-    "→ 1つでもNoなら、即座に本文を修正して満たしてから出力。",
-
-    "",
-
-    "※自己検証時は《TAG:要素名》の一時タグ法（例：TAG:伏線回収, TAG:比喩 等）を内部で用いてよいが、出力直前に必ず全削除し、本文にタグを一切残さないこと。"
+    "- 技法名やメタ解説を本文に書いていないか。"
 
   ].join("\n");
 
 
-  const verifyPrompt = [
-    "以下の本文を厳密に審査し、基準を1つでも満たさない場合は本文を修正した完全版を出力してください。",
+  const prompt = [
 
-    "満たしている場合は本文をそのまま出力してください。",
+    "以下の漫才台本を厳密に編集してください。",
+
+    "基準を満たしていれば内容をできるだけ維持し、満たしていない部分だけ自然に修正してください。",
+
+    "出力は修正後の本文だけ。タイトル、解説、分析、チェック結果は禁止です。",
 
     "",
 
@@ -1227,75 +1744,90 @@ function normalizeError(err) {
 
     "【本文】",
 
-    body
+    String(body)
 
   ].join("\n");
 
 
-  const messages = [
-    {
-      role: "system",
-
-      content:
-        "あなたは厳格な編集者です。出力は本文のみ（解説・根拠・余計なテキストは禁止）。一時タグは出力に残さないこと。"
-    },
-
-    {
-      role: "user",
-
-      content: verifyPrompt
-    }
-  ];
-
-
-  const approxTok =
-    Math.min(
-      8192,
-      Math.ceil(
-        Math.max(maxLen * 2, 2000) * 3
-      )
-    );
-
-
-  /*
-   * GPT-6 Astraでは temperature を送信しない。
-   */
-
   const resp =
-    await client.chat.completions.create({
+    await client
+      .chat
+      .completions
+      .create({
 
-      model,
+        model,
 
-      messages,
+        messages: [
 
-      max_output_tokens:
-        approxTok
+          {
 
-    });
+            role:
+              "system",
+
+            content:
+              "あなたは漫才台本の最終編集者です。本文だけを出力してください。"
+
+          },
+
+          {
+
+            role:
+              "user",
+
+            content:
+              prompt
+
+          }
+
+        ],
+
+        max_output_tokens:
+          Math.min(
+            8192,
+            Math.max(
+              2000,
+              Math.ceil(
+                maxLen * 3
+              )
+            )
+          )
+
+      });
 
 
   let revised =
-    resp?.choices?.[0]?.message?.content?.trim() ||
+    resp
+      ?.choices?.[0]
+      ?.message
+      ?.content
+      ?.trim() ||
     body;
 
 
-  // 仕上げ整形（順序固定）
+  revised =
+    revised
+      .replace(
+        /^```(?:text|markdown|txt)?\s*/i,
+        ""
+      )
+      .replace(
+        /\s*```$/i,
+        ""
+      )
+      .trim();
+
 
   revised =
     normalizeSpeakerColons(
       revised
     );
 
+
   revised =
     ensureBlankLineBetweenTurns(
       revised
     );
 
-  revised =
-    ensureTsukkomiOutro(
-      revised,
-      tsukkomiName
-    );
 
   revised =
     enforceCharLimit(
@@ -1306,24 +1838,36 @@ function normalizeError(err) {
     );
 
 
-  return revised;
+  revised =
+    ensureTsukkomiOutro(
+      revised,
+      tsukkomiName
+    );
+
+
+  return revised.trim();
+}
 
 
 /* =========================
-★ 5.6) 最終本文からタイトルを再生成
+タイトル生成
 ========================= */
 
 async function generateTitleForBody({
+
   client,
+
   model,
+
   body
+
 }) {
 
   const prompt = [
 
-    "以下の漫才台本の内容にふさわしい、面白くてキャッチーな「タイトル」を1つだけ考えてください。",
+    "以下の漫才台本の内容にふさわしい、面白くてキャッチーなタイトルを1つだけ考えてください。",
 
-    "・出力はタイトルのみ（余計な挨拶や「タイトル：」などの接頭辞は不要）",
+    "・タイトルのみ",
 
     "・20文字以内",
 
@@ -1339,56 +1883,75 @@ async function generateTitleForBody({
   const messages = [
 
     {
-      role: "system",
+
+      role:
+        "system",
 
       content:
         "あなたは優秀な放送作家です。"
+
     },
 
     {
-      role: "user",
 
-      content: prompt
+      role:
+        "user",
+
+      content:
+        prompt
+
     }
 
   ];
 
 
-  /*
-   * GPT-6 Astraでは temperature を送信しない。
-   */
-
   const resp =
-    await client.chat.completions.create({
+    await client
+      .chat
+      .completions
+      .create({
 
-      model,
+        model,
 
-      messages,
+        messages,
 
-      max_output_tokens: 100
+        max_output_tokens:
+          100
 
-    });
+      });
 
 
   let title =
-    resp?.choices?.[0]?.message?.content?.trim() ||
+    resp
+      ?.choices?.[0]
+      ?.message
+      ?.content
+      ?.trim() ||
     "";
 
 
-  // 掃除
-
   title =
     title
-      .replace(/^【|】$/g, "")
-      .replace(/^タイトル[:：]\s*/, "")
-      .replace(/\"/g, "");
+      .replace(
+        /^【|】$/g,
+        ""
+      )
+      .replace(
+        /^タイトル[:：]\s*/,
+        ""
+      )
+      .replace(
+        /\"/g,
+        ""
+      );
 
 
   return title;
 }
+
+
 /* =========================
-7) HTTP ハンドラ
-（後払い消費＋安定出力）
+HTTP Handler
 ========================= */
 
 export default async function handler(
@@ -1396,20 +1959,17 @@ export default async function handler(
   res
 ) {
 
-  /*
-   * Android / iPhone / Webからの
-   * APIアクセスに対応
-   */
-
   res.setHeader(
     "Access-Control-Allow-Origin",
     "*"
   );
 
+
   res.setHeader(
     "Access-Control-Allow-Methods",
     "POST, OPTIONS"
   );
+
 
   res.setHeader(
     "Access-Control-Allow-Headers",
@@ -1417,39 +1977,38 @@ export default async function handler(
   );
 
 
-  /*
-   * CORS preflight
-   */
+  if (
+    req.method ===
+    "OPTIONS"
+  ) {
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
+    return res
+      .status(204)
+      .end();
   }
 
 
   try {
 
     if (
-      req.method !== "POST"
+      req.method !==
+      "POST"
     ) {
 
       return res
         .status(405)
         .json({
+
           error:
             "Method Not Allowed"
-        });
 
+        });
     }
 
 
-    /*
-     * =========================
-     * 購入反映モード
-     * =========================
-     *
-     * credit_100 のみ
-     * 100クレジット付与
-     */
+    /* =========================
+    購入
+    ========================= */
 
     if (
       req.body?.action ===
@@ -1461,7 +2020,8 @@ export default async function handler(
         const {
           user_id,
           product_id
-        } = req.body || {};
+        } =
+          req.body || {};
 
 
         if (!user_id) {
@@ -1469,10 +2029,11 @@ export default async function handler(
           return res
             .status(400)
             .json({
+
               error:
                 "user_id required"
-            });
 
+            });
         }
 
 
@@ -1499,10 +2060,14 @@ export default async function handler(
       } catch (e) {
 
         const ee =
-          normalizeError(e);
+          normalizeError(
+            e
+          );
+
 
         const status =
-          ee.status || 500;
+          ee.status ||
+          500;
 
 
         return res
@@ -1516,35 +2081,39 @@ export default async function handler(
               ee
 
           });
-
       }
-
     }
 
 
-    /*
-     * =========================
-     * 通常の漫才生成
-     * =========================
-     */
+    /* =========================
+    入力
+    ========================= */
 
     const {
+
       theme,
+
       genre,
+
       characters,
+
       length,
+
       boke,
+
       tsukkomi,
+
       general,
+
       user_id
-    } = req.body || {};
+
+    } =
+      req.body || {};
 
 
-    /*
-     * 生成前：
-     * 残高チェックのみ
-     * この時点では消費しない
-     */
+    /* =========================
+    クレジット確認
+    ========================= */
 
     const gate =
       await checkCredit(
@@ -1556,8 +2125,13 @@ export default async function handler(
 
       const row =
         gate.row || {
-          output_count: 0,
-          paid_credits: 0
+
+          output_count:
+            0,
+
+          paid_credits:
+            0
+
         };
 
 
@@ -1575,27 +2149,35 @@ export default async function handler(
             row.paid_credits
 
         });
-
     }
 
 
-    /*
-     * =========================
-     * プロンプト生成
-     * =========================
-     */
+    /* =========================
+    プロンプト
+    ========================= */
 
     const {
+
       prompt,
+
       techniquesForMeta,
+
       structureMeta,
+
       maxLen,
+
       minLen,
+
       tsukkomiName,
+
       targetLen,
+
       safeTheme,
+
       safeGenre,
+
       charDesc
+
     } =
       buildPrompt({
 
@@ -1610,17 +2192,23 @@ export default async function handler(
         selected: {
 
           boke:
-            Array.isArray(boke)
+            Array.isArray(
+              boke
+            )
               ? boke
               : [],
 
           tsukkomi:
-            Array.isArray(tsukkomi)
+            Array.isArray(
+              tsukkomi
+            )
               ? tsukkomi
               : [],
 
           general:
-            Array.isArray(general)
+            Array.isArray(
+              general
+            )
               ? general
               : []
 
@@ -1629,35 +2217,43 @@ export default async function handler(
       });
 
 
-    /*
-     * =========================
-     * GPT-6 Astra 呼び出し
-     * =========================
-     */
+    /* =========================
+    GPT生成
+    ========================= */
 
     const approxMaxTok =
       Math.min(
+
         8192,
+
         Math.ceil(
+
           Math.max(
             maxLen * 2,
             3500
           ) * 3
+
         )
+
       );
 
 
     const messages = [
 
       {
-        role: "system",
+
+        role:
+          "system",
 
         content:
           "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。"
+
       },
 
       {
-        role: "user",
+
+        role:
+          "user",
 
         content:
           prompt
@@ -1666,16 +2262,6 @@ export default async function handler(
 
     ];
 
-
-    /*
-     * ★変更点
-     *
-     * DEFAULT_MODEL
-     * →
-     * OPENAI_MODEL
-     *
-     * temperature は削除
-     */
 
     const payload = {
 
@@ -1706,7 +2292,9 @@ export default async function handler(
     } catch (err) {
 
       const e =
-        normalizeError(err);
+        normalizeError(
+          err
+        );
 
 
       console.error(
@@ -1715,14 +2303,10 @@ export default async function handler(
       );
 
 
-      /*
-       * API失敗時は
-       * クレジットを消費しない
-       */
-
       return res
         .status(
-          e.status || 500
+          e.status ||
+          500
         )
         .json({
 
@@ -1733,21 +2317,92 @@ export default async function handler(
             e
 
         });
-
     }
+
+
     /* =========================
-本文の整形後処理
-========================= */
+    OpenAI本文取得
+    ========================= */
+
+    const rawContent =
+      completion
+        ?.choices?.[0]
+        ?.message
+        ?.content
+        ?.trim() ||
+      "";
+
+
+    if (!rawContent) {
+
+      return res
+        .status(502)
+        .json({
+
+          error:
+            "Empty output"
+
+        });
+    }
+
+
+    let title =
+      "";
+
+    let body =
+      rawContent;
+
+
+    {
+
+      const split =
+        splitTitleAndBody(
+          rawContent
+        );
+
+
+      title =
+        split.title;
+
+
+      body =
+        split.body;
+    }
+
+
+    {
+
+      const normalized =
+        ensureSingleTitle(
+          title,
+          body
+        );
+
+
+      title =
+        normalized.title;
+
+
+      body =
+        normalized.body;
+    }
+
+
+    /* =========================
+    初期整形
+    ========================= */
 
     body =
       normalizeSpeakerColons(
         body
       );
 
+
     body =
       ensureBlankLineBetweenTurns(
         body
       );
+
 
     body =
       ensureTsukkomiOutro(
@@ -1757,7 +2412,7 @@ export default async function handler(
 
 
     /* =========================
-    指定文字数との差を補う
+    文字数不足なら続き
     ========================= */
 
     const deficit =
@@ -1765,7 +2420,9 @@ export default async function handler(
       body.length;
 
 
-    if (deficit >= 30) {
+    if (
+      deficit >= 30
+    ) {
 
       try {
 
@@ -1774,9 +2431,6 @@ export default async function handler(
 
             client,
 
-            /*
-             * ★ GPT-6 Astraを使用
-             */
             model:
               OPENAI_MODEL,
 
@@ -1791,19 +2445,17 @@ export default async function handler(
           });
 
 
-        /*
-         * 追記後も同じ順序で仕上げる
-         */
-
         body =
           normalizeSpeakerColons(
             body
           );
 
+
         body =
           ensureBlankLineBetweenTurns(
             body
           );
+
 
         body =
           ensureTsukkomiOutro(
@@ -1811,22 +2463,18 @@ export default async function handler(
             tsukkomiName
           );
 
-
       } catch (e) {
 
         console.warn(
           "[continuation] failed:",
           e?.message || e
         );
-
       }
-
     }
 
 
     /* =========================
-    自己検証＆自動修正
-    （採用する技法の担保）
+    自己検証
     ========================= */
 
     const requiredForCheck =
@@ -1844,9 +2492,6 @@ export default async function handler(
 
           client,
 
-          /*
-           * ★ GPT-6 Astra
-           */
           model:
             OPENAI_MODEL,
 
@@ -1871,24 +2516,17 @@ export default async function handler(
 
         });
 
-
     } catch (e) {
 
       console.warn(
         "[self-verify] failed:",
         e?.message || e
       );
-
-      /*
-       * 検証が失敗しても致命的にはしない。
-       * 本文は現状のまま続行。
-       */
-
     }
 
 
     /* =========================
-    最終レンジ調整
+    最終文字数
     ========================= */
 
     body =
@@ -1902,12 +2540,13 @@ export default async function handler(
 
     /* =========================
     タイトル再生成
-    本文確定後に内容と整合させる
     ========================= */
 
     if (
-      typeof body === "string" &&
-      body.trim().length > 0
+      typeof body ===
+        "string" &&
+      body.trim().length >
+        0
     ) {
 
       try {
@@ -1917,9 +2556,6 @@ export default async function handler(
 
             client,
 
-            /*
-             * ★ GPT-6 Astra
-             */
             model:
               OPENAI_MODEL,
 
@@ -1930,14 +2566,13 @@ export default async function handler(
 
         if (
           newTitle &&
-          newTitle.length > 0
+          newTitle.length >
+            0
         ) {
 
           title =
             newTitle;
-
         }
-
 
       } catch (e) {
 
@@ -1945,42 +2580,36 @@ export default async function handler(
           "[title-gen] failed:",
           e?.message || e
         );
-
       }
-
     }
 
 
     /* =========================
     成功判定
-    本文非空のみ
     ========================= */
 
     const success =
-      typeof body === "string" &&
-      body.trim().length > 0;
+      typeof body ===
+        "string" &&
+      body.trim().length >
+        0;
 
 
     if (!success) {
 
-      /*
-       * 失敗：
-       * クレジットは消費しない
-       */
-
       return res
         .status(500)
         .json({
+
           error:
             "Empty output"
-        });
 
+        });
     }
 
 
     /* =========================
-    成功：
-    ここで初めてクレジット消費
+    成功後にクレジット消費
     ========================= */
 
     await consumeAfterSuccess(
@@ -1989,12 +2618,14 @@ export default async function handler(
 
 
     /* =========================
-    残量取得
+    残量
     ========================= */
 
-    let metaUsage = null;
+    let metaUsage =
+      null;
 
-    let metaCredits = null;
+    let metaCredits =
+      null;
 
 
     if (
@@ -2019,34 +2650,19 @@ export default async function handler(
           row.paid_credits ??
           null;
 
-
       } catch (e) {
 
         console.warn(
           "[supabase] fetch after consume failed:",
           e?.message || e
         );
-
       }
-
     }
 
 
     /* =========================
-    iPhone / Swift の
-    JSONDecoder対策
+    Swift / JSON sanitize
     ========================= */
-
-    /*
-     * AIが生成した文字列に混入する可能性がある
-     * 特殊Unicode（行区切り文字など）、
-     * 不正なサロゲートペア、
-     * 制御文字（C0、C1、BOM等）を
-     * 除去・正規化する。
-     *
-     * iOS / Swift の JSONDecoder での
-     * パースクラッシュやデコードエラーを防止。
-     */
 
     const sanitizeStringForSwift =
       (str) => {
@@ -2055,38 +2671,22 @@ export default async function handler(
           typeof str !==
           "string"
         ) {
+
           return "";
         }
 
 
         let s =
           str
-
-            /*
-             * Unicodeの行区切り文字を
-             * 通常の改行へ
-             */
-
             .replace(
               /[\u2028\u2029]/g,
               "\n"
             )
-
-            /*
-             * C0/C1制御文字、
-             * BOM等を削除
-             */
-
             .replace(
               /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFEFF]/g,
               ""
             );
 
-
-        /*
-         * toWellFormed() が利用できる
-         * Node.js環境ではこちらを使用。
-         */
 
         if (
           typeof s.toWellFormed ===
@@ -2096,34 +2696,22 @@ export default async function handler(
           s =
             s.toWellFormed();
 
-
         } else {
-
-          /*
-           * 古い環境向けフォールバック
-           */
 
           s =
             s.replace(
               /[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g,
-
               (m) =>
                 m.length > 1
                   ? m
                   : "\ufffd"
             );
-
         }
 
 
         return s;
-
       };
 
-
-    /* =========================
-    各レスポンス値をサニタイズ
-    ========================= */
 
     const sanitizedBody =
       sanitizeStringForSwift(
@@ -2141,9 +2729,11 @@ export default async function handler(
       Array.isArray(
         structureMeta
       )
+
         ? structureMeta.map(
             sanitizeStringForSwift
           )
+
         : [];
 
 
@@ -2151,14 +2741,16 @@ export default async function handler(
       Array.isArray(
         techniquesForMeta
       )
+
         ? techniquesForMeta.map(
             sanitizeStringForSwift
           )
+
         : [];
 
 
     /* =========================
-    UTF-8 JSON
+    Response
     ========================= */
 
     res.setHeader(
@@ -2167,63 +2759,33 @@ export default async function handler(
     );
 
 
-    /* =========================
-    Android / iPhone共通レスポンス
-    ========================= */
-
     return res
       .status(200)
       .json({
-
-        /*
-         * iPhone
-         */
 
         title:
           sanitizedTitle ||
           "（タイトル未設定）",
 
-
-        /*
-         * iPhone / Android
-         */
-
         body:
           sanitizedBody ||
           "（ネタの生成に失敗しました）",
-
-
-        /*
-         * Android旧版などとの互換
-         */
 
         text:
           sanitizedBody ||
           "（ネタの生成に失敗しました）",
 
-
-        /*
-         * 念のためcontentも返す
-         */
-
         content:
           sanitizedBody ||
           "（ネタの生成に失敗しました）",
-
-
-        /* =========================
-        メタデータ
-        ========================= */
 
         meta: {
 
           structure:
             sanitizedStructure,
 
-
           techniques:
             sanitizedTechniques,
-
 
           usage_count:
             metaUsage
@@ -2232,14 +2794,12 @@ export default async function handler(
                 )
               : 0,
 
-
           paid_credits:
             metaCredits
               ? Math.floor(
                   metaCredits
                 )
               : 0,
-
 
           target_length:
             targetLen
@@ -2248,7 +2808,6 @@ export default async function handler(
                 )
               : 0,
 
-
           min_length:
             minLen
               ? Math.floor(
@@ -2256,14 +2815,12 @@ export default async function handler(
                 )
               : 0,
 
-
           max_length:
             maxLen
               ? Math.floor(
                   maxLen
                 )
               : 0,
-
 
           actual_length:
             sanitizedBody.length
@@ -2287,11 +2844,6 @@ export default async function handler(
     );
 
 
-    /*
-     * 失敗：
-     * もちろんクレジットは消費しない
-     */
-
     return res
       .status(500)
       .json({
@@ -2303,7 +2855,5 @@ export default async function handler(
           e
 
       });
-
   }
-
 }
