@@ -2830,18 +2830,54 @@ export default async function handler(
       });
 
 
-  } catch (err) {
+ } catch (err) {
 
-    const e =
-      normalizeError(
-        err
-      );
+  console.error(
+    "[openai error raw]",
+    err
+  );
 
+  console.error(
+    "[openai error cause]",
+    err?.cause
+  );
 
-    console.error(
-      "[handler error]",
-      e
-    );
+  const e =
+    normalizeError(err);
+
+  console.error(
+    "[openai error normalized]",
+    e
+  );
+
+  return res
+    .status(
+      e.status || 500
+    )
+    .json({
+      error:
+        "OpenAI request failed",
+      detail:
+        e,
+      cause:
+        err?.cause
+          ? {
+              name:
+                err.cause.name,
+              message:
+                err.cause.message,
+              code:
+                err.cause.code,
+              errno:
+                err.cause.errno,
+              syscall:
+                err.cause.syscall,
+              hostname:
+                err.cause.hostname
+            }
+          : null
+    });
+}
 
 
     return res
@@ -2856,4 +2892,3 @@ export default async function handler(
 
       });
   }
-}
