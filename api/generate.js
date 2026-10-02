@@ -1,4 +1,4 @@
-javascript
+
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -1082,7 +1082,7 @@ function labelizeSelected({
   };
 }
 
-javascript
+
 /* =========================
 プロンプト
 ========================= */
@@ -1847,7 +1847,7 @@ async function selfVerifyAndCorrectBody({
   return revised.trim();
 }
 
-javascript
+
 /* =========================
 メイン handler
 ========================= */
