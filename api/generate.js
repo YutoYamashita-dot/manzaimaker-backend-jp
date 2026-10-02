@@ -1,7 +1,7 @@
 // api/generate.js
 // Vercel Node.js (ESM)。本文のみを日本語で返す（台本だけ）
 // 必須: 環境変数 OPENAI_API_KEY
-// 仕様: まず gpt-6.1-sol を試し、使えない場合は gpt-6-luna に自動フォールバック
+// 仕様: まず gpt-6-sol を試し、使えない場合は gpt-6-luna に自動フォールバック
 
 export const config = { runtime: "nodejs" };
 
@@ -197,7 +197,7 @@ function buildPrompt({ theme, genre, characters, length, selected }) {
    6) OpenAI 呼び出し
    ========================= */
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const PREFERRED_MODEL = process.env.OPENAI_MODEL || "gpt-6.1-sol";
+const PREFERRED_MODEL = process.env.OPENAI_MODEL || "gpt-6-sol";
 const FALLBACK_MODEL = "gpt-6-luna";
 
 async function createWithFallback(payloadBase) {
