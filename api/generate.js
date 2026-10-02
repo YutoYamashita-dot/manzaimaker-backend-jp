@@ -208,7 +208,6 @@ async function createWithFallback(payloadBase) {
     return await openai.responses.create({
       model: PREFERRED_MODEL,
       input: payloadBase.input,
-      temperature: payloadBase.temperature,
       max_output_tokens: payloadBase.max_output_tokens,
     });
   } catch (e) {
@@ -220,7 +219,6 @@ async function createWithFallback(payloadBase) {
     return await openai.responses.create({
       model: FALLBACK_MODEL,
       input: payloadBase.input,
-      temperature: payloadBase.temperature,
       max_output_tokens: payloadBase.max_output_tokens,
     });
   }
@@ -261,7 +259,6 @@ export default async function handler(req, res) {
           content: prompt,
         },
       ],
-      temperature: 0.8,
       max_output_tokens: 1400,
     };
 
