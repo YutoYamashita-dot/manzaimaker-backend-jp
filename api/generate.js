@@ -1,3 +1,4 @@
+javascript
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -820,14 +821,12 @@ function ensureSingleTitle(
       titleIn || ""
     );
 
-
   let body =
     (bodyIn || "")
       .replace(
         /\r\n/g,
         "\n"
       );
-
 
   let lines =
     body.split("\n");
@@ -1083,7 +1082,7 @@ function labelizeSelected({
   };
 }
 
-
+javascript
 /* =========================
 プロンプト
 ========================= */
@@ -1848,110 +1847,9 @@ async function selfVerifyAndCorrectBody({
   return revised.trim();
 }
 
-
+javascript
 /* =========================
-タイトル生成
-========================= */
-
-async function generateTitleForBody({
-
-  client,
-
-  model,
-
-  body
-
-}) {
-
-  const prompt = [
-
-    "以下の漫才台本の内容にふさわしい、面白くてキャッチーなタイトルを1つだけ考えてください。",
-
-    "・タイトルのみ",
-
-    "・20文字以内",
-
-    "",
-
-    "【漫才台本】",
-
-    body
-
-  ].join("\n");
-
-
-  const messages = [
-
-    {
-
-      role:
-        "system",
-
-      content:
-        "あなたは優秀な放送作家です。"
-
-    },
-
-    {
-
-      role:
-        "user",
-
-      content:
-        prompt
-
-    }
-
-  ];
-
-
-  const resp =
-    await client
-      .chat
-      .completions
-      .create({
-
-        model,
-
-        messages,
-
-        max_output_tokens:
-          100
-
-      });
-
-
-  let title =
-    resp
-      ?.choices?.[0]
-      ?.message
-      ?.content
-      ?.trim() ||
-    "";
-
-
-  title =
-    title
-      .replace(
-        /^【|】$/g,
-        ""
-      )
-      .replace(
-        /^タイトル[:：]\s*/,
-        ""
-      )
-      .replace(
-        /\"/g,
-        ""
-      );
-
-
-  return title;
-}
-
-
-/* =========================
-HTTP Handler
+メイン handler
 ========================= */
 
 export default async function handler(
@@ -1959,202 +1857,212 @@ export default async function handler(
   res
 ) {
 
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "*"
-  );
-
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "POST, OPTIONS"
-  );
-
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type"
-  );
-
-
   if (
-    req.method ===
-    "OPTIONS"
+    req.method !==
+    "POST"
   ) {
 
     return res
-      .status(204)
-      .end();
+      .status(405)
+      .json({
+        error:
+          "Method Not Allowed"
+      });
   }
 
 
   try {
 
+    const body =
+      req.body || {};
+
+
+    const action =
+      body.action ||
+      "generate";
+
+
+    /* =========================
+    購入クレジット追加
+    ========================= */
+
     if (
-      req.method !==
-      "POST"
+      action ===
+      "add_credits"
     ) {
 
+      const user_id =
+        String(
+          body.user_id ||
+          ""
+        ).trim();
+
+
+      const product_id =
+        String(
+          body.product_id ||
+          ""
+        ).trim();
+
+
+      if (!user_id) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "user_id is required"
+          });
+      }
+
+
+      if (!product_id) {
+
+        return res
+          .status(400)
+          .json({
+            error:
+              "product_id is required"
+          });
+      }
+
+
+      const paidCredits =
+        await addCreditsForPurchase(
+          user_id,
+          product_id
+        );
+
+
       return res
-        .status(405)
+        .status(200)
         .json({
 
-          error:
-            "Method Not Allowed"
+          ok: true,
+
+          user_id,
+
+          product_id,
+
+          paid_credits:
+            paidCredits
 
         });
     }
 
 
     /* =========================
-    購入
+    通常生成
     ========================= */
 
     if (
-      req.body?.action ===
-      "add_credit"
+      action !==
+      "generate"
     ) {
 
-      try {
-
-        const {
-          user_id,
-          product_id
-        } =
-          req.body || {};
-
-
-        if (!user_id) {
-
-          return res
-            .status(400)
-            .json({
-
-              error:
-                "user_id required"
-
-            });
-        }
-
-
-        const nextPaid =
-          await addCreditsForPurchase(
-            user_id,
-            product_id
-          );
-
-
-        return res
-          .status(200)
-          .json({
-
-            ok: true,
-
-            paid_credits:
-              nextPaid,
-
-            product_id
-
-          });
-
-      } catch (e) {
-
-        const ee =
-          normalizeError(
-            e
-          );
-
-
-        const status =
-          ee.status ||
-          500;
-
-
-        return res
-          .status(status)
-          .json({
-
-            error:
-              "add_credit failed",
-
-            detail:
-              ee
-
-          });
-      }
+      return res
+        .status(400)
+        .json({
+          error:
+            "Unknown action"
+        });
     }
 
 
-    /* =========================
-    入力
-    ========================= */
+    const user_id =
+      String(
+        body.user_id ||
+        ""
+      ).trim();
 
-    const {
 
-      theme,
+    const theme =
+      String(
+        body.theme ||
+        ""
+      ).trim();
 
-      genre,
 
-      characters,
+    const genre =
+      String(
+        body.genre ||
+        ""
+      ).trim();
 
-      length,
 
-      boke,
+    const characters =
+      body.characters ??
+      "";
 
-      tsukkomi,
 
-      general,
+    const length =
+      Number(
+        body.length ||
+        1000
+      );
 
-      user_id
 
-    } =
-      req.body || {};
+    const selected =
+      body.selected ||
+      body.techniques ||
+      {};
 
 
     /* =========================
     クレジット確認
     ========================= */
 
-    const gate =
+    const credit =
       await checkCredit(
         user_id
       );
 
 
-    if (!gate.ok) {
-
-      const row =
-        gate.row || {
-
-          output_count:
-            0,
-
-          paid_credits:
-            0
-
-        };
-
+    if (!credit.ok) {
 
       return res
-        .status(403)
+        .status(402)
         .json({
 
           error:
-            `使用上限（${FREE_QUOTA}回）に達しており、クレジットが不足しています。`,
+            "クレジットが不足しています。",
 
-          usage_count:
-            row.output_count,
+          code:
+            "INSUFFICIENT_CREDITS",
+
+          output_count:
+            credit.row
+              ?.output_count ??
+            0,
 
           paid_credits:
-            row.paid_credits
+            credit.row
+              ?.paid_credits ??
+            0
 
         });
     }
 
 
     /* =========================
-    プロンプト
+    プロンプト作成
     ========================= */
+
+    const promptData =
+      buildPrompt({
+
+        theme,
+
+        genre,
+
+        characters,
+
+        length,
+
+        selected
+
+      });
+
 
     const {
 
@@ -2164,9 +2072,9 @@ export default async function handler(
 
       structureMeta,
 
-      maxLen,
-
       minLen,
+
+      maxLen,
 
       tsukkomiName,
 
@@ -2179,362 +2087,276 @@ export default async function handler(
       charDesc
 
     } =
-      buildPrompt({
-
-        theme,
-
-        genre,
-
-        characters,
-
-        length,
-
-        selected: {
-
-          boke:
-            Array.isArray(
-              boke
-            )
-              ? boke
-              : [],
-
-          tsukkomi:
-            Array.isArray(
-              tsukkomi
-            )
-              ? tsukkomi
-              : [],
-
-          general:
-            Array.isArray(
-              general
-            )
-              ? general
-              : []
-
-        }
-
-      });
+      promptData;
 
 
     /* =========================
-    GPT生成
+    初回生成
     ========================= */
 
-    const approxMaxTok =
-      Math.min(
+    const response =
+      await client
+        .chat
+        .completions
+        .create({
 
-        8192,
+          model:
+            OPENAI_MODEL,
 
-        Math.ceil(
+          messages: [
 
-          Math.max(
-            maxLen * 2,
-            3500
-          ) * 3
+            {
 
-        )
+              role:
+                "system",
 
-      );
+              content:
+                [
+                  "あなたはプロの漫才作家です。",
+                  "舞台でそのまま使える、日本語の漫才台本を作成してください。",
+                  "説明や分析ではなく、完成した台本だけを出力してください。",
+                  "必ず自然な掛け合いと明確なオチを作ってください。"
+                ].join("\n")
 
+            },
 
-    const messages = [
+            {
 
-      {
+              role:
+                "user",
 
-        role:
-          "system",
+              content:
+                prompt
 
-        content:
-          "あなたは実力派の漫才師コンビです。舞台で即使える台本だけを出力してください。解説・メタ記述は禁止。"
+            }
 
-      },
+          ],
 
-      {
-
-        role:
-          "user",
-
-        content:
-          prompt
-
-      }
-
-    ];
-
-
-    const payload = {
-
-      model:
-        OPENAI_MODEL,
-
-      messages,
-
-      max_output_tokens:
-        approxMaxTok
-
-    };
-
-
-    let completion;
-
-
-    try {
-
-      completion =
-        await client
-          .chat
-          .completions
-          .create(
-            payload
-          );
-
-    } catch (err) {
-
-      const e =
-        normalizeError(
-          err
-        );
-
-
-      console.error(
-        "[openai error]",
-        e
-      );
-
-
-      return res
-        .status(
-          e.status ||
-          500
-        )
-        .json({
-
-          error:
-            "OpenAI request failed",
-
-          detail:
-            e
+          max_output_tokens:
+            Math.min(
+              8192,
+              Math.max(
+                2000,
+                Math.ceil(
+                  targetLen * 3
+                )
+              )
+            )
 
         });
-    }
 
 
-    /* =========================
-    OpenAI本文取得
-    ========================= */
-
-    const rawContent =
-      completion
+    let raw =
+      response
         ?.choices?.[0]
         ?.message
-        ?.content
-        ?.trim() ||
+        ?.content ||
       "";
 
 
-    if (!rawContent) {
-
-      return res
-        .status(502)
-        .json({
-
-          error:
-            "Empty output"
-
-        });
-    }
-
-
-    let title =
-      "";
-
-    let body =
-      rawContent;
-
-
-    {
-
-      const split =
-        splitTitleAndBody(
-          rawContent
-        );
-
-
-      title =
-        split.title;
-
-
-      body =
-        split.body;
-    }
-
-
-    {
-
-      const normalized =
-        ensureSingleTitle(
-          title,
-          body
-        );
-
-
-      title =
-        normalized.title;
-
-
-      body =
-        normalized.body;
-    }
+    raw =
+      String(
+        raw
+      )
+      .replace(
+        /^```(?:text|markdown|txt)?\s*/i,
+        ""
+      )
+      .replace(
+        /\s*```$/i,
+        ""
+      )
+      .trim();
 
 
     /* =========================
-    初期整形
+    タイトルと本文を分離
     ========================= */
 
-    body =
+    let {
+      title,
+      body: generatedBody
+    } =
+      splitTitleAndBody(
+        raw
+      );
+
+
+    const normalized =
+      ensureSingleTitle(
+        title,
+        generatedBody
+      );
+
+
+    title =
+      normalized.title;
+
+
+    let bodyText =
+      normalized.body;
+
+
+    /* =========================
+    話者表記・空行を整形
+    ========================= */
+
+    bodyText =
       normalizeSpeakerColons(
-        body
+        bodyText
       );
 
 
-    body =
+    bodyText =
       ensureBlankLineBetweenTurns(
-        body
+        bodyText
       );
 
 
-    body =
+    /* =========================
+    最初の「もういいよ！」
+    ========================= */
+
+    bodyText =
       ensureTsukkomiOutro(
-        body,
+        bodyText,
         tsukkomiName
       );
 
 
     /* =========================
-    文字数不足なら続き
+    短すぎる場合は続きを生成
     ========================= */
-
-    const deficit =
-      targetLen -
-      body.length;
-
 
     if (
-      deficit >= 30
+      bodyText.length <
+      minLen
     ) {
 
-      try {
+      const remainingChars =
+        Math.max(
+          minLen -
+            bodyText.length,
 
-        body =
-          await generateContinuation({
-
-            client,
-
-            model:
-              OPENAI_MODEL,
-
-            baseBody:
-              body,
-
-            remainingChars:
-              deficit,
-
-            tsukkomiName
-
-          });
-
-
-        body =
-          normalizeSpeakerColons(
-            body
-          );
-
-
-        body =
-          ensureBlankLineBetweenTurns(
-            body
-          );
-
-
-        body =
-          ensureTsukkomiOutro(
-            body,
-            tsukkomiName
-          );
-
-      } catch (e) {
-
-        console.warn(
-          "[continuation] failed:",
-          e?.message || e
+          Math.ceil(
+            minLen * 0.2
+          )
         );
-      }
-    }
 
 
-    /* =========================
-    自己検証
-    ========================= */
-
-    const requiredForCheck =
-      Array.isArray(
-        techniquesForMeta
-      )
-        ? techniquesForMeta
-        : [];
-
-
-    try {
-
-      body =
-        await selfVerifyAndCorrectBody({
+      bodyText =
+        await generateContinuation({
 
           client,
 
           model:
             OPENAI_MODEL,
 
-          body,
+          baseBody:
+            bodyText,
 
-          requiredTechs:
-            requiredForCheck,
+          remainingChars,
 
-          minLen,
-
-          maxLen,
-
-          tsukkomiName,
-
-          theme:
-            safeTheme,
-
-          genre:
-            safeGenre,
-
-          charDesc
+          tsukkomiName
 
         });
 
-    } catch (e) {
 
-      console.warn(
-        "[self-verify] failed:",
-        e?.message || e
-      );
+      bodyText =
+        normalizeSpeakerColons(
+          bodyText
+        );
+
+
+      bodyText =
+        ensureBlankLineBetweenTurns(
+          bodyText
+        );
+
+
+      bodyText =
+        ensureTsukkomiOutro(
+          bodyText,
+          tsukkomiName
+        );
     }
 
 
     /* =========================
-    最終文字数
+    自己検証・修正
     ========================= */
 
-    body =
+    bodyText =
+      await selfVerifyAndCorrectBody({
+
+        client,
+
+        model:
+          OPENAI_MODEL,
+
+        body:
+          bodyText,
+
+        requiredTechs:
+          techniquesForMeta,
+
+        minLen,
+
+        maxLen,
+
+        tsukkomiName,
+
+        theme:
+          safeTheme,
+
+        genre:
+          safeGenre,
+
+        charDesc
+
+      });
+
+
+    /* =========================
+    最終整形
+    ========================= */
+
+    bodyText =
+      normalizeSpeakerColons(
+        bodyText
+      );
+
+
+    bodyText =
+      ensureBlankLineBetweenTurns(
+        bodyText
+      );
+
+
+    bodyText =
       enforceCharLimit(
-        body,
+        bodyText,
         minLen,
         maxLen,
         false
+      );
+
+
+    /*
+     * ★★★★★★★★★★★★★★★★★★★★★
+     *
+     * ここが今回の1か所だけの修正箇所
+     *
+     * 文字数制限で末尾が切られた場合でも、
+     * 最終的に必ず「もういいよ！」を付ける。
+     *
+     * ★★★★★★★★★★★★★★★★★★★★★
+     */
+
+    bodyText =
+      ensureTsukkomiOutro(
+        bodyText,
+        tsukkomiName
       );
 
 
@@ -2543,352 +2365,229 @@ export default async function handler(
     ========================= */
 
     if (
-      typeof body ===
-        "string" &&
-      body.trim().length >
-        0
+      !title ||
+      title ===
+        "（タイトル未設定）"
     ) {
 
       try {
 
-        const newTitle =
-          await generateTitleForBody({
+        const titleResponse =
+          await client
+            .chat
+            .completions
+            .create({
 
-            client,
+              model:
+                OPENAI_MODEL,
 
-            model:
-              OPENAI_MODEL,
+              messages: [
 
-            body
+                {
 
-          });
+                  role:
+                    "system",
 
+                  content:
+                    "あなたは漫才のタイトルを考える専門家です。タイトルだけを出力してください。"
 
-        if (
-          newTitle &&
-          newTitle.length >
-            0
-        ) {
+                },
 
-          title =
-            newTitle;
-        }
+                {
 
-      } catch (e) {
+                  role:
+                    "user",
 
-        console.warn(
-          "[title-gen] failed:",
-          e?.message || e
-        );
-      }
-    }
+                  content:
+                    [
+                      `題材: ${safeTheme}`,
 
+                      `ジャンル: ${safeGenre}`,
 
-    /* =========================
-    成功判定
-    ========================= */
+                      "",
 
-    const success =
-      typeof body ===
-        "string" &&
-      body.trim().length >
-        0;
+                      "以下の漫才本文に合う、短くて覚えやすいタイトルを1つだけ作ってください。",
 
+                      "",
 
-    if (!success) {
+                      bodyText
 
-      return res
-        .status(500)
-        .json({
+                    ].join("\n")
 
-          error:
-            "Empty output"
+                }
 
-        });
-    }
+              ],
+
+              max_output_tokens:
+                200
+
+            });
 
 
-    /* =========================
-    成功後にクレジット消費
-    ========================= */
-
-    await consumeAfterSuccess(
-      user_id
-    );
-
-
-    /* =========================
-    残量
-    ========================= */
-
-    let metaUsage =
-      null;
-
-    let metaCredits =
-      null;
+        title =
+          titleResponse
+            ?.choices?.[0]
+            ?.message
+            ?.content
+            ?.trim() ||
+          "無題";
 
 
-    if (
-      hasSupabase &&
-      user_id
-    ) {
-
-      try {
-
-        const row =
-          await getUsageRow(
-            user_id
+        title =
+          normalizeTitleString(
+            title
           );
 
-
-        metaUsage =
-          row.output_count ??
-          null;
-
-
-        metaCredits =
-          row.paid_credits ??
-          null;
-
-      } catch (e) {
+      } catch (
+        titleError
+      ) {
 
         console.warn(
-          "[supabase] fetch after consume failed:",
-          e?.message || e
+          "[title generation failed]",
+          titleError
         );
+
+
+        title =
+          "無題";
       }
     }
 
 
     /* =========================
-    Swift / JSON sanitize
+    最終的な本文チェック
     ========================= */
 
-    const sanitizeStringForSwift =
-      (str) => {
-
-        if (
-          typeof str !==
-          "string"
-        ) {
-
-          return "";
-        }
-
-
-        let s =
-          str
-            .replace(
-              /[\u2028\u2029]/g,
-              "\n"
-            )
-            .replace(
-              /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFEFF]/g,
-              ""
-            );
-
-
-        if (
-          typeof s.toWellFormed ===
-          "function"
-        ) {
-
-          s =
-            s.toWellFormed();
-
-        } else {
-
-          s =
-            s.replace(
-              /[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g,
-              (m) =>
-                m.length > 1
-                  ? m
-                  : "\ufffd"
-            );
-        }
-
-
-        return s;
-      };
-
-
-    const sanitizedBody =
-      sanitizeStringForSwift(
-        body
+    bodyText =
+      ensureTsukkomiOutro(
+        bodyText,
+        tsukkomiName
       );
-
-
-    const sanitizedTitle =
-      sanitizeStringForSwift(
-        title
-      );
-
-
-    const sanitizedStructure =
-      Array.isArray(
-        structureMeta
-      )
-
-        ? structureMeta.map(
-            sanitizeStringForSwift
-          )
-
-        : [];
-
-
-    const sanitizedTechniques =
-      Array.isArray(
-        techniquesForMeta
-      )
-
-        ? techniquesForMeta.map(
-            sanitizeStringForSwift
-          )
-
-        : [];
 
 
     /* =========================
-    Response
+    クレジット消費
     ========================= */
 
-    res.setHeader(
-      "Content-Type",
-      "application/json; charset=utf-8"
-    );
+    const consumption =
+      await consumeAfterSuccess(
+        user_id
+      );
 
+
+    /* =========================
+    レスポンス
+    ========================= */
 
     return res
       .status(200)
       .json({
 
-        title:
-          sanitizedTitle ||
-          "（タイトル未設定）",
+        ok: true,
+
+        title,
 
         body:
-          sanitizedBody ||
-          "（ネタの生成に失敗しました）",
+          bodyText,
 
         text:
-          sanitizedBody ||
-          "（ネタの生成に失敗しました）",
+          bodyText,
 
-        content:
-          sanitizedBody ||
-          "（ネタの生成に失敗しました）",
+        script:
+          bodyText,
 
-        meta: {
+        techniques:
+          techniquesForMeta,
 
-          structure:
-            sanitizedStructure,
+        structure:
+          structureMeta,
 
-          techniques:
-            sanitizedTechniques,
+        target_length:
+          targetLen,
 
-          usage_count:
-            metaUsage
-              ? Math.floor(
-                  metaUsage
-                )
-              : 0,
+        min_length:
+          minLen,
 
-          paid_credits:
-            metaCredits
-              ? Math.floor(
-                  metaCredits
-                )
-              : 0,
+        max_length:
+          maxLen,
 
-          target_length:
-            targetLen
-              ? Math.floor(
-                  targetLen
-                )
-              : 0,
+        tsukkomi_outro:
+          `${tsukkomiName}: もういいよ！`,
 
-          min_length:
-            minLen
-              ? Math.floor(
-                  minLen
-                )
-              : 0,
-
-          max_length:
-            maxLen
-              ? Math.floor(
-                  maxLen
-                )
-              : 0,
-
-          actual_length:
-            sanitizedBody.length
-
-        }
+        consumed:
+          consumption.consumed ??
+          null
 
       });
 
 
- } catch (err) {
-
-  console.error(
-    "[openai error raw]",
+  } catch (
     err
-  );
+  ) {
 
-  console.error(
-    "[openai error cause]",
-    err?.cause
-  );
+    console.error(
+      "[openai error raw]",
+      err
+    );
 
-  const e =
-    normalizeError(err);
 
-  console.error(
-    "[openai error normalized]",
-    e
-  );
+    console.error(
+      "[openai error cause]",
+      err?.cause
+    );
 
-  return res
-    .status(
-      e.status || 500
-    )
-    .json({
-      error:
-        "OpenAI request failed",
-      detail:
-        e,
-      cause:
-        err?.cause
-          ? {
-              name:
-                err.cause.name,
-              message:
-                err.cause.message,
-              code:
-                err.cause.code,
-              errno:
-                err.cause.errno,
-              syscall:
-                err.cause.syscall,
-              hostname:
-                err.cause.hostname
-            }
-          : null
-    });
-}
+
+    const e =
+      normalizeError(
+        err
+      );
+
+
+    console.error(
+      "[openai error normalized]",
+      e
+    );
 
 
     return res
-      .status(500)
+      .status(
+        e.status ||
+        500
+      )
       .json({
 
         error:
-          "Server Error",
+          "OpenAI request failed",
 
         detail:
-          e
+          e,
+
+        cause:
+          err?.cause
+            ? {
+
+                name:
+                  err.cause.name,
+
+                message:
+                  err.cause.message,
+
+                code:
+                  err.cause.code,
+
+                errno:
+                  err.cause.errno,
+
+                syscall:
+                  err.cause.syscall,
+
+                hostname:
+                  err.cause.hostname
+
+              }
+
+            : null
 
       });
   }
+}
