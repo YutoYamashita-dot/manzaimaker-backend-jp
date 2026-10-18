@@ -1,4 +1,3 @@
-
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -96,25 +95,38 @@ async function getUsageRow(user_id) {
     };
   }
 
-  const { data, error } =
-    await supabase
-      .from("user_usage")
-      .select(
-        "output_count, paid_credits"
-      )
-      .eq("user_id", user_id)
-      .maybeSingle();
+  try {
+    const { data, error } =
+      await supabase
+        .from("user_usage")
+        .select(
+          "output_count, paid_credits"
+        )
+        .eq("user_id", user_id)
+        .maybeSingle();
 
-  if (error) {
-    throw error;
-  }
+    if (error) {
+      throw error;
+    }
 
-  return (
-    data || {
+    return (
+      data || {
+        output_count: 0,
+        paid_credits: 0
+      }
+    );
+  } catch (e) {
+    // Supabaseが休止中や接続エラーでも止まらずに無料枠扱いで通過させる
+    console.warn(
+      "[supabase] getUsageRow failed, bypassing credit check:",
+      e?.message || e
+    );
+
+    return {
       output_count: 0,
       paid_credits: 0
-    }
-  );
+    };
+  }
 }
 
 
