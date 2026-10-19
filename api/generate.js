@@ -26,9 +26,9 @@ Supabase / Credit
 （Androidの500回+100クレジット方式 と iOSの3回+買い切り方式の両対応）
 ========================= */
 
-const FREE_QUOTA_DEFAULT = 500; // Android / 従来版の無料枠
-const FREE_QUOTA_IOS_NEW = 3;   // iOS 買い切り版の無料枠
-const UNLIMITED_FLAG_VALUE = 999999; // 買い切りアンロック時のpaid_credits値
+const FREE_QUOTA_DEFAULT = 500;
+const FREE_QUOTA_IOS_NEW = 3;
+const UNLIMITED_FLAG_VALUE = 999999;
 
 
 async function incrementUsage(
@@ -119,7 +119,6 @@ async function getUsageRow(user_id) {
       }
     );
   } catch (e) {
-    // ★ Supabaseが休止中(ENOTFOUND)や接続エラーでも止まらずに通過させる
     console.warn(
       "[supabase] getUsageRow failed, bypassing credit check:",
       e?.message || e
@@ -198,7 +197,6 @@ async function checkCredit(
   const paid =
     row.paid_credits ?? 0;
 
-  // ★ iOSの新プランなら無料枠3回、それ以外（Android等）なら無料枠500回
   const quota =
     plan_type === "ios_unlimited"
       ? FREE_QUOTA_IOS_NEW
@@ -255,7 +253,6 @@ async function consumeAfterSuccess(
         : FREE_QUOTA_DEFAULT;
 
 
-    // 1. iOSの買い切り済みユーザー（または無制限フラグ値が入っている場合）は paid_credits を減らさない
     if (
       (isIosUnlimitedPlan && paid > 0) ||
       paid >= UNLIMITED_FLAG_VALUE
@@ -282,7 +279,6 @@ async function consumeAfterSuccess(
     }
 
 
-    // 2. 無料枠内の消費（Androidは500回まで、iOSは3回まで）
     if (used < quota) {
 
       await setUsageRow(
@@ -306,7 +302,6 @@ async function consumeAfterSuccess(
     }
 
 
-    // 3. Android等の従来型・有料クレジット消費（1回ごとに paid_credits を -1 する）
     if (paid > 0) {
 
       const nextPaid =
@@ -358,8 +353,8 @@ async function consumeAfterSuccess(
 }
 
 
-const PRODUCT_CREDIT_100 = "credit_100";           // Android等の100クレジット追加用
-const PRODUCT_UNLIMITED  = "unlimited_unlock";     // iOSの300円買い切り無制限用
+const PRODUCT_CREDIT_100 = "credit_100";
+const PRODUCT_UNLIMITED  = "unlimited_unlock";
 const CREDIT_100_AMOUNT  = 100;
 
 
@@ -385,10 +380,8 @@ async function addCreditsForPurchase(
   let nextPaid = paid;
 
   if (product_id === PRODUCT_CREDIT_100) {
-    // ★ Android等：100クレジット追加（消耗型）
     nextPaid = paid + CREDIT_100_AMOUNT;
   } else if (product_id === PRODUCT_UNLIMITED) {
-    // ★ iOS：300円買い切り無制限アンロック（非消耗型）
     nextPaid = UNLIMITED_FLAG_VALUE;
   } else {
     const err =
@@ -528,47 +521,6 @@ function resolveTechKey(item, table) {
     }
   }
   return null;
-}
-
-
-const MUST_HAVE_TECH =
-  "比喩ツッコミ";
-
-
-function pickTechniquesWithMetaphor() {
-
-  const pool = [
-    "風刺",
-    "皮肉",
-    "意外性と納得感",
-    "勘違い→訂正",
-    "言い間違い→すれ違い",
-    "立場逆転",
-    "具体例の誇張"
-  ];
-
-
-  const shuffled =
-    [...pool].sort(
-      () =>
-        Math.random() -
-        0.5
-    );
-
-
-  const extraCount =
-    Math.floor(
-      Math.random() * 3
-    ) + 1;
-
-
-  return [
-    MUST_HAVE_TECH,
-    ...shuffled.slice(
-      0,
-      extraCount
-    )
-  ];
 }
 
 
@@ -839,7 +791,7 @@ function ensureBlankLineBetweenTurns(
 
 
 /* =========================
-タイトル分離
+タイトル分離（★2行目以降が消えるバグを修正）
 ========================= */
 
 function splitTitleAndBody(
@@ -847,45 +799,42 @@ function splitTitleAndBody(
 ) {
 
   if (!s) {
-
     return {
       title: "",
       body: ""
     };
   }
 
+  const trimmed = String(s).trim();
 
-  const parts =
-    s.split(
-      /\r?\n\r?\n/,
-      2
-    );
+  // 最初の空行（または最初の改行）でタイトルと本文を2分割し、本文の残りはすべて維持する
+  const match = trimmed.match(/\r?\n\r?\n/);
 
+  if (!match || match.index === undefined) {
+    // 空行がない場合は1行目をタイトル、2行目以降を本文にする
+    const firstNewline = trimmed.indexOf("\n");
+    if (firstNewline === -1) {
+      return {
+        title: "",
+        body: trimmed
+      };
+    }
+    const rawTitle = trimmed.slice(0, firstNewline).trim();
+    const body = trimmed.slice(firstNewline + 1).trim();
+    return {
+      title: rawTitle.replace(/^【/, "").replace(/】$/, ""),
+      body
+    };
+  }
 
-  const rawTitle =
-    (
-      parts[0] ||
-      ""
-    ).trim();
+  const rawTitle = trimmed.slice(0, match.index).trim();
+  const title = rawTitle
+    .replace(/^【/, "")
+    .replace(/】$/, "");
 
-
-  const title =
-    rawTitle
-      .replace(
-        /^【/,
-        ""
-      )
-      .replace(
-        /】/,
-        "");
-
-
-  const body =
-    (
-      parts[1] ??
-      s
-    ).trim();
-
+  const body = trimmed
+    .slice(match.index + match[0].length)
+    .trim();
 
   return {
     title,
@@ -1045,7 +994,7 @@ function ensureSingleTitle(
 
     title:
       title ||
-      "（タイトル未設定）",
+      "無題",
 
     body:
       lines.join("\n")
@@ -1416,165 +1365,6 @@ function buildPrompt({
 
 
 /* =========================
-続き生成
-========================= */
-
-async function generateContinuation({
-  client,
-  model,
-  baseBody,
-  remainingChars,
-  tsukkomiName
-}) {
-
-  let seed =
-    baseBody
-      .replace(
-        new RegExp(
-          `${tsukkomiName}: もういいよ!\\s*$`
-        ),
-        ""
-      )
-      .trim();
-
-
-  const contPrompt = [
-
-    "以下は途中まで書かれた漫才の本文です。これをそのまま続けてください。",
-
-    "・タイトルは出さない",
-
-    "・これまでの台詞やネタの反復はしない",
-
-    `・少なくとも ${remainingChars} 文字以上、自然に展開し、最後は ${tsukkomiName}: もういいよ！ で締める`,
-
-    "・各行は「名前: セリフ」の形式（半角コロン＋スペース）",
-
-    "・台詞同士の間には必ず空行を1つ挟む",
-
-    "・一時タグは出力に残さない",
-
-    "",
-
-    "■最終チェック",
-
-    "- 題材から逸れない。",
-
-    "- 採用する技法を自然に使う。",
-
-    "- 意外性と納得感の両方を作る。",
-
-    "- 導入→展開→オチを成立させる。",
-
-    `- 文字数は ${remainingChars}文字以上を目安にする。`,
-
-    "- 各台詞は「名前: セリフ」形式。",
-
-    `- 最後は ${tsukkomiName}: もういいよ！ の行で終える。`,
-
-    "- 固有名詞や具体的な数字を使う。",
-
-    "- 抽象的な表現を避ける。",
-
-    "",
-
-    "【これまでの本文】",
-
-    seed
-
-  ].join("\n");
-
-
-  const messages = [
-
-    {
-
-      role:
-        "system",
-
-      content:
-        "あなたは実力派の漫才師コンビです。本文の続きだけを出力してください。"
-
-    },
-
-    {
-
-      role:
-        "user",
-
-      content:
-        contPrompt
-
-    }
-
-  ];
-
-
-  const approxTok =
-    Math.min(
-      8192,
-      Math.ceil(
-        Math.max(
-          remainingChars * 2,
-          400
-        ) * 3
-      )
-    );
-
-
-  const resp =
-    await client
-      .chat
-      .completions
-      .create({
-
-        model,
-
-        messages,
-
-        max_output_tokens:
-          approxTok
-
-      });
-
-
-  let cont =
-    resp
-      ?.choices?.[0]
-      ?.message
-      ?.content
-      ?.trim() ||
-    "";
-
-
-  cont =
-    normalizeSpeakerColons(
-      cont
-    );
-
-
-  cont =
-    ensureBlankLineBetweenTurns(
-      cont
-    );
-
-
-  cont =
-    ensureTsukkomiOutro(
-      cont,
-      tsukkomiName
-    );
-
-
-  return (
-    seed +
-    "\n" +
-    cont
-  ).trim();
-}
-
-
-/* =========================
 OpenAI
 ========================= */
 
@@ -1760,193 +1550,6 @@ function normalizeError(
 
 
 /* =========================
-自己検証
-========================= */
-
-async function selfVerifyAndCorrectBody({
-
-  client,
-
-  model,
-
-  body,
-
-  requiredTechs = [],
-
-  minLen,
-
-  maxLen,
-
-  tsukkomiName = "B",
-
-  theme = "",
-
-  genre = "",
-
-  charDesc = ""
-
-}) {
-
-  if (
-    !body ||
-    !String(body).trim()
-  ) {
-
-    return "";
-  }
-
-
-  const checklist = [
-
-    "■最終出力前に必ず確認すること：",
-
-    `- 指定された題材「${theme}」が台本全体の中心になっているか。`,
-
-    `- 指定されたジャンル「${genre}」に沿っているか。`,
-
-    `- 指定された登場人物「${charDesc}」の性格設定を守っているか。`,
-
-    `- 採用する技法をできるだけ具体的な台詞・展開として使っているか。`,
-
-    `- 採用技法: ${requiredTechs.join("、") || "指定なし"}`,
-
-    "- 意外性と納得感の両方があるか。",
-
-    "- 導入→展開→オチの流れが成立しているか。",
-
-    `- 本文は${minLen}〜${maxLen}文字程度か。`,
-
-    "- 各台詞は「名前: セリフ」形式か。",
-
-    `- 最後は ${tsukkomiName}: もういいよ！ で終わっているか。`,
-
-    "- 技法名やメタ解説を本文に書いていないか。"
-
-  ].join("\n");
-
-
-  const prompt = [
-
-    "以下の漫才台本を厳密に編集してください。",
-
-    "基準を満たしていれば内容をできるだけ維持し、満たしていない部分だけ自然に修正してください。",
-
-    "出力は修正後の本文だけ。タイトル、解説、分析、チェック結果は禁止です。",
-
-    "",
-
-    checklist,
-
-    "",
-
-    "【本文】",
-
-    String(body)
-
-  ].join("\n");
-
-
-  const resp =
-    await client
-      .chat
-      .completions
-      .create({
-
-        model,
-
-        messages: [
-
-          {
-
-            role:
-              "system",
-
-            content:
-              "あなたは漫才台本の最終編集者です。本文だけを出力してください。"
-
-          },
-
-          {
-
-            role:
-              "user",
-
-            content:
-              prompt
-
-          }
-
-        ],
-
-        max_output_tokens:
-          Math.min(
-            8192,
-            Math.max(
-              2000,
-              Math.ceil(
-                maxLen * 3
-              )
-            )
-          )
-
-      });
-
-
-  let revised =
-    resp
-      ?.choices?.[0]
-      ?.message
-      ?.content
-      ?.trim() ||
-    body;
-
-
-  revised =
-    revised
-      .replace(
-        /^```(?:text|markdown|txt)?\s*/i,
-        ""
-      )
-      .replace(
-        /\s*```$/i,
-        ""
-      )
-      .trim();
-
-
-  revised =
-    normalizeSpeakerColons(
-      revised
-    );
-
-
-  revised =
-    ensureBlankLineBetweenTurns(
-      revised
-    );
-
-
-  revised =
-    enforceCharLimit(
-      revised,
-      minLen,
-      maxLen,
-      false
-    );
-
-
-  revised =
-    ensureTsukkomiOutro(
-      revised,
-      tsukkomiName
-    );
-
-
-  return revised.trim();
-}
-
-
-/* =========================
 メイン handler
 ========================= */
 
@@ -1982,7 +1585,6 @@ export default async function handler(
 
     /* =========================
     購入クレジット追加 / 買い切りアンロック
-    （Androidの "credit_100" と iOSの "unlimited_unlock" 両対応）
     ========================= */
 
     if (
@@ -2077,7 +1679,6 @@ export default async function handler(
       ).trim();
 
 
-    // ★ iOSの新プランなら "ios_unlimited" が入ってくる（Androidからは空文字になる）
     const plan_type =
       String(
         body.plan_type ||
@@ -2139,7 +1740,7 @@ export default async function handler(
 
 
     /* =========================
-    クレジット確認（OS・プラン別）
+    クレジット確認
     ========================= */
 
     const credit =
@@ -2211,18 +1812,14 @@ export default async function handler(
 
       targetLen,
 
-      safeTheme,
-
-      safeGenre,
-
-      charDesc
+      safeTheme
 
     } =
       promptData;
 
 
     /* =========================
-    初回生成
+    漫才生成（1回の呼び出しで高速に完了させる）
     ========================= */
 
     const response =
@@ -2321,131 +1918,11 @@ export default async function handler(
 
 
     title =
-      normalized.title;
+      normalized.title || safeTheme;
 
 
     let bodyText =
       normalized.body;
-
-
-    /* =========================
-    話者表記・空行を整形
-    ========================= */
-
-    bodyText =
-      normalizeSpeakerColons(
-        bodyText
-      );
-
-
-    bodyText =
-      ensureBlankLineBetweenTurns(
-        bodyText
-      );
-
-
-    /* =========================
-    最初の「もういいよ！」
-    ========================= */
-
-    bodyText =
-      ensureTsukkomiOutro(
-        bodyText,
-        tsukkomiName
-      );
-
-
-    /* =========================
-    短すぎる場合は続きを生成
-    ========================= */
-
-    if (
-      bodyText.length <
-      minLen
-    ) {
-
-      const remainingChars =
-        Math.max(
-          minLen -
-            bodyText.length,
-
-          Math.ceil(
-            minLen * 0.2
-          )
-        );
-
-
-      bodyText =
-        await generateContinuation({
-
-          client,
-
-          model:
-            OPENAI_MODEL,
-
-          baseBody:
-            bodyText,
-
-          remainingChars,
-
-          tsukkomiName
-
-        });
-
-
-      bodyText =
-        normalizeSpeakerColons(
-          bodyText
-        );
-
-
-      bodyText =
-        ensureBlankLineBetweenTurns(
-          bodyText
-        );
-
-
-      bodyText =
-        ensureTsukkomiOutro(
-          bodyText,
-          tsukkomiName
-        );
-    }
-
-
-    /* =========================
-    自己検証・修正
-    ========================= */
-
-    bodyText =
-      await selfVerifyAndCorrectBody({
-
-        client,
-
-        model:
-          OPENAI_MODEL,
-
-        body:
-          bodyText,
-
-        requiredTechs:
-          techniquesForMeta,
-
-        minLen,
-
-        maxLen,
-
-        tsukkomiName,
-
-        theme:
-          safeTheme,
-
-        genre:
-          safeGenre,
-
-        charDesc
-
-      });
 
 
     /* =========================
@@ -2481,112 +1958,7 @@ export default async function handler(
 
 
     /* =========================
-    タイトル再生成
-    ========================= */
-
-    if (
-      !title ||
-      title ===
-        "（タイトル未設定）"
-    ) {
-
-      try {
-
-        const titleResponse =
-          await client
-            .chat
-            .completions
-            .create({
-
-              model:
-                OPENAI_MODEL,
-
-              messages: [
-
-                {
-
-                  role:
-                    "system",
-
-                  content:
-                    "あなたは漫才のタイトルを考える専門家です。タイトルだけを出力してください。"
-
-                },
-
-                {
-
-                  role:
-                    "user",
-
-                  content:
-                    [
-                      `題材: ${safeTheme}`,
-
-                      `ジャンル: ${safeGenre}`,
-
-                      "",
-
-                      "以下の漫才本文に合う、短くて覚えやすいタイトルを1つだけ作ってください。",
-
-                      "",
-
-                      bodyText
-
-                    ].join("\n")
-
-                }
-
-              ],
-
-              max_output_tokens:
-                200
-
-            });
-
-
-        title =
-          titleResponse
-            ?.choices?.[0]
-            ?.message
-            ?.content
-            ?.trim() ||
-          "無題";
-
-
-        title =
-          normalizeTitleString(
-            title
-          );
-
-      } catch (
-        titleError
-      ) {
-
-        console.warn(
-          "[title generation failed]",
-          titleError
-        );
-
-
-        title =
-          "無題";
-      }
-    }
-
-
-    /* =========================
-    最終的な本文チェック
-    ========================= */
-
-    bodyText =
-      ensureTsukkomiOutro(
-        bodyText,
-        tsukkomiName
-      );
-
-
-    /* =========================
-    クレジット消費（OS・プラン別）
+    クレジット消費
     ========================= */
 
     const consumption =
