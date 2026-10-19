@@ -797,7 +797,8 @@ export default async function handler(req, res) {
             "あなたはプロの漫才作家です。",
             "舞台でそのまま使える、日本語の漫才台本を作成してください。",
             "説明や分析ではなく、完成した台本だけを出力してください。",
-            "必ず自然な掛け合いと明確なオチを作ってください。"
+            "必ず自然な掛け合いと明確なオチを作ってください。",
+            "緊張と緩和などのお笑い理論やテクニックを駆使した台本にしてください。"
           ].join("\n")
         },
         {
@@ -867,7 +868,7 @@ export default async function handler(req, res) {
             syscall: err.cause.syscall,
             hostname: err.cause.hostname
           }
-        : null
+        : nullgit
     });
   }
 }
