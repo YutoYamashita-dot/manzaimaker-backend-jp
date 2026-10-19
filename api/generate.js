@@ -13,20 +13,20 @@ const supabase = hasSupabase
 
 /* =========================
 Supabase / Credit
-（Androidの500回+100クレジット方式 と iOSの3回+買い切り方式の両対応）
+（Android有料版500回+100クレジット / Android無料版10回 / iOS 3回+買い切り の全対応）
 ========================= */
 
-const UNLIMITED_FLAG_VALUE = 999999;
 const FREE_QUOTA_DEFAULT = 500;
 const FREE_QUOTA_IOS_NEW = 3;
-const FREE_QUOTA_ANDROID_AD = 10; // ★ 追加：Android広告付き無料版は10回
+const FREE_QUOTA_ANDROID_AD = 10; // ★ Android広告付き無料版の上限（10回）
+const UNLIMITED_FLAG_VALUE = 999999;
 
-// checkCredit 関数内 と consumeAfterSuccess 関数内の quota 計算部分を以下に変更：
-const quota = plan_type === "ios_unlimited"
-  ? FREE_QUOTA_IOS_NEW
-  : plan_type === "android_free_10"
-    ? FREE_QUOTA_ANDROID_AD
-    : FREE_QUOTA_DEFAULT;
+// プラン種別に応じた無料枠上限を返すヘルパー関数
+function resolveQuotaByPlan(plan_type = "") {
+  if (plan_type === "ios_unlimited") return FREE_QUOTA_IOS_NEW;
+  if (plan_type === "android_free_10") return FREE_QUOTA_ANDROID_AD;
+  return FREE_QUOTA_DEFAULT;
+}
 
 async function incrementUsage(user_id, delta = 1) {
   if (!hasSupabase || !user_id) return null;
@@ -108,9 +108,7 @@ async function checkCredit(user_id, plan_type = "") {
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
 
-  const quota = plan_type === "ios_unlimited"
-    ? FREE_QUOTA_IOS_NEW
-    : FREE_QUOTA_DEFAULT;
+  const quota = resolveQuotaByPlan(plan_type);
 
   return {
     ok: used < quota || paid > 0,
@@ -130,7 +128,7 @@ async function consumeAfterSuccess(user_id, plan_type = "") {
     const nextUsed = used + 1;
 
     const isIosUnlimitedPlan = plan_type === "ios_unlimited";
-    const quota = isIosUnlimitedPlan ? FREE_QUOTA_IOS_NEW : FREE_QUOTA_DEFAULT;
+    const quota = resolveQuotaByPlan(plan_type);
 
     // 1. iOS買い切り済み or 無制限フラグ値の場合は paid_credits を減らさない
     if ((isIosUnlimitedPlan && paid > 0) || paid >= UNLIMITED_FLAG_VALUE) {
@@ -297,7 +295,6 @@ function resolveTechKey(item, table) {
 文字数・整形ユーティリティ
 ========================= */
 
-// ★ オチが途中で切れないよう allowOverflow のデフォルトを true に変更
 function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   if (!text) return "";
 
@@ -330,7 +327,6 @@ function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   return t;
 }
 
-// ★ 台本内からツッコミ役（2人目または右側の話者）の名前を自動推定し、自然な締めにする
 function detectTsukkomiSpeakerFromScript(text, fallbackName = "B") {
   if (!text) return fallbackName;
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -357,7 +353,6 @@ function ensureTsukkomiOutro(text, defaultTsukkomiName = "B") {
 
   let t = text.trim();
 
-  // すでにAIが「もういいよ」「もうええわ」「いい加減にしろ」「ありがとうございました」等で綺麗に締めていればそのまま活かす
   const alreadyHasNaturalEnding = /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
   if (alreadyHasNaturalEnding) {
     return t;
@@ -409,7 +404,6 @@ function splitTitleAndBody(s) {
 
   const trimmed = String(s).trim();
 
-  // 最初の1行目がすでに「A: 〜」などセリフから始まっている場合はタイトルなしとして全文を本文にする
   const firstLine = trimmed.split(/\r?\n/)[0].trim();
   if (/^[^:\n：]{1,12}[：:]\s*\S/.test(firstLine) && !/^(タイトル|Title)/i.test(firstLine)) {
     return { title: "", body: trimmed };
@@ -548,7 +542,6 @@ function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
   };
 }
 
-// 登場人物の入力文字列からボケ・ツッコミの名前を推定する補助関数
 function parseCharacterNames(charDesc) {
   if (!charDesc) return { bokeName: "A", tsukkomiName: "B" };
   const parts = charDesc
@@ -600,7 +593,6 @@ function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, s
     ? techniquesForMeta.join("、")
     : "指定なし";
 
-  // ★ アプリの ManzaiPerformanceDialog と完全連携する演出タグ指示を追加
   const prompt = [
     "以下の条件で、日本語の漫才台本を1本作成してください。",
     "",
@@ -714,7 +706,6 @@ const client = {
           content: String(m.content ?? "")
         }));
 
-        // 推論トークン(Reasoning)で上限に達して本文が空になるのを防ぐため十分なトークン枠を確保
         const request = {
           model,
           input,
@@ -847,7 +838,7 @@ export default async function handler(req, res) {
       safeTheme
     } = buildPrompt({ theme, genre, characters, length, selected });
 
-    // 漫才生成（1回の呼び出しで完了させる）
+    // 漫才生成
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
@@ -881,7 +872,7 @@ export default async function handler(req, res) {
     title = normalized.title && normalized.title !== "無題" ? normalized.title : safeTheme;
     let bodyText = normalized.body;
 
-    // 整形（オチが切れないよう allowOverflow = true で整形）
+    // 整形
     bodyText = normalizeSpeakerColons(bodyText);
     bodyText = ensureBlankLineBetweenTurns(bodyText);
     bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
