@@ -23,7 +23,13 @@ const supabase =
 
 /* =========================
 Supabase / Credit
+（Androidの500回+100クレジット方式 と iOSの3回+買い切り方式の両対応）
 ========================= */
+
+const FREE_QUOTA_DEFAULT = 500; // Android / 従来版の無料枠
+const FREE_QUOTA_IOS_NEW = 3;   // iOS 買い切り版の無料枠
+const UNLIMITED_FLAG_VALUE = 999999; // 買い切りアンロック時のpaid_credits値
+
 
 async function incrementUsage(
   user_id,
@@ -78,9 +84,6 @@ async function incrementUsage(
     return null;
   }
 }
-
-
-const FREE_QUOTA = 500;
 
 
 async function getUsageRow(user_id) {
@@ -161,7 +164,6 @@ async function setUsageRow(
       throw error;
     }
   } catch (e) {
-    // ★ 書き込み時もSupabaseエラーで全体を落とさないように保護
     console.warn(
       "[supabase] setUsageRow failed:",
       e?.message || e
@@ -171,7 +173,8 @@ async function setUsageRow(
 
 
 async function checkCredit(
-  user_id
+  user_id,
+  plan_type = ""
 ) {
 
   if (
@@ -195,9 +198,15 @@ async function checkCredit(
   const paid =
     row.paid_credits ?? 0;
 
+  // ★ iOSの新プランなら無料枠3回、それ以外（Android等）なら無料枠500回
+  const quota =
+    plan_type === "ios_unlimited"
+      ? FREE_QUOTA_IOS_NEW
+      : FREE_QUOTA_DEFAULT;
+
   return {
     ok:
-      used < FREE_QUOTA ||
+      used < quota ||
       paid > 0,
 
     row
@@ -206,7 +215,8 @@ async function checkCredit(
 
 
 async function consumeAfterSuccess(
-  user_id
+  user_id,
+  plan_type = ""
 ) {
 
   if (
@@ -233,19 +243,53 @@ async function consumeAfterSuccess(
     const paid =
       row.paid_credits ?? 0;
 
+    const nextUsed =
+      used + 1;
 
+    const isIosUnlimitedPlan =
+      plan_type === "ios_unlimited";
+
+    const quota =
+      isIosUnlimitedPlan
+        ? FREE_QUOTA_IOS_NEW
+        : FREE_QUOTA_DEFAULT;
+
+
+    // 1. iOSの買い切り済みユーザー（または無制限フラグ値が入っている場合）は paid_credits を減らさない
     if (
-      used < FREE_QUOTA
+      (isIosUnlimitedPlan && paid > 0) ||
+      paid >= UNLIMITED_FLAG_VALUE
     ) {
-
-      const nextUsed = used + 1;
 
       await setUsageRow(
         user_id,
         {
           output_count:
             nextUsed,
+          paid_credits:
+            paid
+        }
+      );
 
+      return {
+        consumed:
+          "unlimited",
+        output_count:
+          nextUsed,
+        paid_credits:
+          paid
+      };
+    }
+
+
+    // 2. 無料枠内の消費（Androidは500回まで、iOSは3回まで）
+    if (used < quota) {
+
+      await setUsageRow(
+        user_id,
+        {
+          output_count:
+            nextUsed,
           paid_credits:
             paid
         }
@@ -262,17 +306,17 @@ async function consumeAfterSuccess(
     }
 
 
+    // 3. Android等の従来型・有料クレジット消費（1回ごとに paid_credits を -1 する）
     if (paid > 0) {
 
-      const nextUsed = used + 1;
-      const nextPaid = paid - 1;
+      const nextPaid =
+        paid - 1;
 
       await setUsageRow(
         user_id,
         {
           output_count:
             nextUsed,
-
           paid_credits:
             nextPaid
         }
@@ -314,11 +358,9 @@ async function consumeAfterSuccess(
 }
 
 
-const ALLOWED_PRODUCT_ID =
-  "credit_100";
-
-const CREDIT_100_AMOUNT =
-  100;
+const PRODUCT_CREDIT_100 = "credit_100";           // Android等の100クレジット追加用
+const PRODUCT_UNLIMITED  = "unlimited_unlock";     // iOSの300円買い切り無制限用
+const CREDIT_100_AMOUNT  = 100;
 
 
 async function addCreditsForPurchase(
@@ -332,23 +374,6 @@ async function addCreditsForPurchase(
     );
   }
 
-
-  if (
-    product_id !==
-    ALLOWED_PRODUCT_ID
-  ) {
-
-    const err =
-      new Error(
-        "Unsupported product_id"
-      );
-
-    err.status = 400;
-
-    throw err;
-  }
-
-
   const row =
     await getUsageRow(
       user_id
@@ -357,10 +382,22 @@ async function addCreditsForPurchase(
   const paid =
     row.paid_credits ?? 0;
 
-  const nextPaid =
-    paid +
-    CREDIT_100_AMOUNT;
+  let nextPaid = paid;
 
+  if (product_id === PRODUCT_CREDIT_100) {
+    // ★ Android等：100クレジット追加（消耗型）
+    nextPaid = paid + CREDIT_100_AMOUNT;
+  } else if (product_id === PRODUCT_UNLIMITED) {
+    // ★ iOS：300円買い切り無制限アンロック（非消耗型）
+    nextPaid = UNLIMITED_FLAG_VALUE;
+  } else {
+    const err =
+      new Error(
+        "Unsupported product_id"
+      );
+    err.status = 400;
+    throw err;
+  }
 
   await setUsageRow(
     user_id,
@@ -372,7 +409,6 @@ async function addCreditsForPurchase(
         nextPaid
     }
   );
-
 
   return nextPaid;
 }
@@ -451,9 +487,7 @@ const GENERAL_DEFS = {
 };
 
 
-// ★ iPhoneアプリから日本語名やcamelCaseで送られてきても定義キーに変換するヘルパー
 const ALIAS_MAP = {
-  // ボケ（日本語名）
   "言い間違い／聞き間違い": "IIMACHIGAI",
   "比喩ボケ": "HIYU",
   "逆説ボケ": "GYAKUSETSU",
@@ -462,14 +496,12 @@ const ALIAS_MAP = {
   "ボケの連鎖": "RENSA",
   "言葉遊び": "KOTOBA_ASOBI",
 
-  // ツッコミ（日本語名）
   "驚き・疑問ツッコミ": "ODOROKI_GIMON",
   "呆れ・冷静ツッコミ": "AKIRE_REISEI",
   "怒りツッコミ": "OKORI",
   "共感ツッコミ": "KYOKAN",
   "メタツッコミ": "META",
 
-  // 全般構成（日本語名 & GeneralTech.swift の rawValue）
   "三段オチ": "SANDAN_OCHI",
   "逆張り構成": "GYAKUHARI",
   "展開破壊": "TENKAI_HAKAI",
@@ -1119,7 +1151,6 @@ function labelizeSelected({
         .map((item) => {
           const key = resolveTechKey(item, table);
           if (key && table[key]) {
-            // 「技法名：説明文」から「技法名」を取り出す
             return table[key].split("：")[0].trim();
           }
           return String(item || "").trim();
@@ -1950,8 +1981,8 @@ export default async function handler(
 
 
     /* =========================
-    購入クレジット追加
-    （iPhone側の "add_credit" と "add_credits" 両対応）
+    購入クレジット追加 / 買い切りアンロック
+    （Androidの "credit_100" と iOSの "unlimited_unlock" 両対応）
     ========================= */
 
     if (
@@ -2046,6 +2077,14 @@ export default async function handler(
       ).trim();
 
 
+    // ★ iOSの新プランなら "ios_unlimited" が入ってくる（Androidからは空文字になる）
+    const plan_type =
+      String(
+        body.plan_type ||
+        ""
+      ).trim();
+
+
     const theme =
       String(
         body.theme ||
@@ -2072,7 +2111,6 @@ export default async function handler(
       );
 
 
-    // ★ iPhoneアプリ（DTOs.swift）のトップレベル boke / tsukkomi / general にも対応
     const rawSelected =
       body.selected ||
       body.techniques ||
@@ -2101,12 +2139,13 @@ export default async function handler(
 
 
     /* =========================
-    クレジット確認
+    クレジット確認（OS・プラン別）
     ========================= */
 
     const credit =
       await checkCredit(
-        user_id
+        user_id,
+        plan_type
       );
 
 
@@ -2434,15 +2473,6 @@ export default async function handler(
       );
 
 
-    /*
-     * ★★★★★★★★★★★★★★★★★★★★★
-     *
-     * 文字数制限で末尾が切られた場合でも、
-     * 最終的に必ず「もういいよ！」を付ける。
-     *
-     * ★★★★★★★★★★★★★★★★★★★★★
-     */
-
     bodyText =
       ensureTsukkomiOutro(
         bodyText,
@@ -2556,17 +2586,18 @@ export default async function handler(
 
 
     /* =========================
-    クレジット消費
+    クレジット消費（OS・プラン別）
     ========================= */
 
     const consumption =
       await consumeAfterSuccess(
-        user_id
+        user_id,
+        plan_type
       );
 
 
     /* =========================
-    レスポンス（iPhoneのDTOs.swiftにある meta に対応）
+    レスポンス
     ========================= */
 
     return res
