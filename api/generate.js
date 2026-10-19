@@ -289,7 +289,8 @@ function resolveTechKey(item, table) {
 文字数・整形ユーティリティ
 ========================= */
 
-function enforceCharLimit(text, minLen, maxLen, allowOverflow = false) {
+// ★ オチが途中で切れないよう allowOverflow のデフォルトを true に変更
+function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   if (!text) return "";
 
   let t = text
@@ -321,18 +322,40 @@ function enforceCharLimit(text, minLen, maxLen, allowOverflow = false) {
   return t;
 }
 
-function ensureTsukkomiOutro(text, tsukkomiName = "B") {
-  const outro = `${tsukkomiName}: もういいよ！`;
+// ★ 台本内からツッコミ役（2人目または右側の話者）の名前を自動推定し、自然な締めにする
+function detectTsukkomiSpeakerFromScript(text, fallbackName = "B") {
+  if (!text) return fallbackName;
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const speakers = [];
+  for (const line of lines) {
+    const m = line.match(/^([^:\n：]{1,15})[：:]\s*/);
+    if (m) {
+      const who = m[1].trim();
+      if (who.includes("ツッコミ") || who.includes("右") || who === "B") {
+        return who;
+      }
+      if (!speakers.includes(who)) {
+        speakers.push(who);
+      }
+    }
+  }
+  return speakers.length >= 2 ? speakers[1] : fallbackName;
+}
+
+function ensureTsukkomiOutro(text, defaultTsukkomiName = "B") {
+  const actualTsukkomi = detectTsukkomiSpeakerFromScript(text, defaultTsukkomiName);
+  const outro = `${actualTsukkomi}: [叩く] もういいよ！`;
   if (!text) return outro;
 
   let t = text.trim();
-  const endPattern = /(?:^|\n)(?:[^:\n]+:\s*)?もういいよ[！!]*\s*$/;
 
-  while (endPattern.test(t)) {
-    t = t.replace(endPattern, "").trim();
+  // すでにAIが「もういいよ」「もうええわ」「いい加減にしろ」「ありがとうございました」等で綺麗に締めていればそのまま活かす
+  const alreadyHasNaturalEnding = /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
+  if (alreadyHasNaturalEnding) {
+    return t;
   }
 
-  return t ? `${t}\n${outro}` : outro;
+  return t ? `${t}\n\n${outro}` : outro;
 }
 
 function normalizeSpeakerColons(s) {
@@ -517,6 +540,23 @@ function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
   };
 }
 
+// 登場人物の入力文字列からボケ・ツッコミの名前を推定する補助関数
+function parseCharacterNames(charDesc) {
+  if (!charDesc) return { bokeName: "A", tsukkomiName: "B" };
+  const parts = charDesc
+    .split(/[、,，／/・\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    const cleanName = (raw) => raw.replace(/[（(].*?[）)]/g, "").replace(/^(ボケ|ツッコミ)[:：]\s*/, "").trim();
+    const n1 = cleanName(parts[0]) || "A";
+    const n2 = cleanName(parts[1]) || "B";
+    return { bokeName: n1, tsukkomiName: n2 };
+  }
+  return { bokeName: "A", tsukkomiName: "B" };
+}
+
 function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, selected = {} }) {
   const boke = Array.isArray(selected.boke) ? selected.boke : [];
   const tsukkomi = Array.isArray(selected.tsukkomi) ? selected.tsukkomi : [];
@@ -539,42 +579,54 @@ function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, s
     ? characters.trim()
     : JSON.stringify(characters ?? "");
 
+  const { bokeName, tsukkomiName } = parseCharacterNames(charDesc);
+
   const targetLen = Number.isFinite(Number(length)) && Number(length) > 0
     ? Math.floor(Number(length))
     : 1000;
 
   const minLen = Math.max(1, Math.floor(targetLen * 0.9));
   const maxLen = Math.max(minLen, Math.ceil(targetLen * 1.1));
-  const tsukkomiName = "B";
 
   const techniqueText = techniquesForMeta.length
     ? techniquesForMeta.join("、")
     : "指定なし";
 
+  // ★ アプリの ManzaiPerformanceDialog と完全連携する演出タグ指示を追加
   const prompt = [
     "以下の条件で、日本語の漫才台本を1本作成してください。",
     "",
     `【題材】${safeTheme}`,
     `【ジャンル】${safeGenre}`,
-    `【登場人物】${charDesc || "A: ボケ、B: ツッコミ"}`,
-    `【目標文字数】${targetLen}文字`,
-    `【許容文字数】${minLen}〜${maxLen}文字程度`,
+    `【登場人物】${charDesc || `${bokeName}（ボケ）、${tsukkomiName}（ツッコミ）`}`,
+    `※左側のボケ役を「${bokeName}」、右側のツッコミ役を「${tsukkomiName}」として台詞を書いてください。`,
+    `【目標文字数】${targetLen}文字（${minLen}〜${maxLen}文字程度）`,
     "",
     "【採用する技法】",
     techniqueText,
     "",
     guideline ? "【技法ガイドライン】\n" + guideline : "",
     "",
+    "【アプリ上演用の演出タグルール（重要）】",
+    "アプリ内でキャラクターが動き・声色・効果音をつけるため、各セリフのコロン（:）の直後に、文脈に合った以下の演出タグを1つ付けてください。",
+    "- [通常] ：普通の会話やフリのセリフ（例: `A: [通常] 最近ちょっと悩みがありましてね。`）",
+    "- [ボケ] ：おどけたボケ、アホな発言、ズレた発言（例: `A: [ボケ] だから僕、昨日から光合成だけで生きてるんです♪`）",
+    "- [演技] ：コント風のなりきり、モノマネ、カギカッコ付きのセリフ（例: `A: [演技] 「いらっしゃいませー！ご注文は？」ってね。`）",
+    "- [疑問] ：首をかしげる疑問や問いかけ（例: `B: [疑問] えっ、それどういうことなん？`）",
+    "- [呆れ] ：呆れたツッコミ、ため息混じりの冷静な指摘（例: `B: [呆れ] いや…お前それ本気で言うてんの…？`）",
+    "- [ツッコミ] ：通常の勢いあるツッコミ・指摘（例: `B: [ツッコミ] いや逆やろ！何してんねん！`）",
+    "- [叩く] ：ネタ後半のクライマックスや決定的な瞬間、または最後の締めに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選すること！ 例: `B: [叩く] なんでやねん！いい加減にしろ！`）",
+    "",
     "【出力ルール】",
-    "- タイトルを最初に1つだけ出す。",
+    "- タイトルを最初に1つだけ出す（【】や「タイトル:」は付けずタイトル文字列のみ）。",
     "- タイトルと本文の間には空行を1つ入れる。",
-    "- 本文は「名前: セリフ」の形式にする。",
+    `- 本文は必ず「${bokeName}: [タグ] セリフ」「${tsukkomiName}: [タグ] セリフ」の形式にする。`,
     "- 各台詞の間には空行を1つ入れる。",
-    "- 解説、分析、制作意図、技法名の説明は出力しない。",
+    "- 解説、分析、制作意図、技法名の説明は一切出力しない。",
     "- 技法名そのものを台詞にしない。",
-    `- 最後は必ず ${tsukkomiName}: もういいよ！ で締める。`,
+    `- 最後は必ず ${tsukkomiName}: [叩く] もういいよ！（または「もうええわ！」）で綺麗にオチをつけて締める。`,
     "- 固有名詞や具体的な数字を使い、抽象的な表現を避ける。",
-    "- 舞台でそのまま使える自然な掛け合いにする。"
+    "- 舞台でそのまま使えるテンポの良い自然な掛け合いにする。"
   ].join("\n");
 
   return {
@@ -794,11 +846,11 @@ export default async function handler(req, res) {
         {
           role: "system",
           content: [
-            "あなたはプロの漫才作家です。",
+            "あなたはM-1グランプリの決勝ネタを数多く手掛けるプロの漫才作家です。",
             "舞台でそのまま使える、日本語の漫才台本を作成してください。",
             "説明や分析ではなく、完成した台本だけを出力してください。",
-            "必ず自然な掛け合いと明確なオチを作ってください。",
-            "緊張と緩和などのお笑い理論やテクニックを駆使した台本にしてください。"
+            "必ず自然な掛け合いと、伏線を回収する明確で面白いオチを作ってください。",
+            "アプリのステージ演出と連携するため、指定された演出タグ（[通常] [ボケ] [演技] [疑問] [呆れ] [ツッコミ] [叩く]）を各セリフの先頭に必ず付けてください。"
           ].join("\n")
         },
         {
@@ -821,10 +873,10 @@ export default async function handler(req, res) {
     title = normalized.title && normalized.title !== "無題" ? normalized.title : safeTheme;
     let bodyText = normalized.body;
 
-    // 整形
+    // 整形（オチが切れないよう allowOverflow = true で整形）
     bodyText = normalizeSpeakerColons(bodyText);
     bodyText = ensureBlankLineBetweenTurns(bodyText);
-    bodyText = enforceCharLimit(bodyText, minLen, maxLen, false);
+    bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
     bodyText = ensureTsukkomiOutro(bodyText, tsukkomiName);
 
     // クレジット消費
@@ -868,7 +920,7 @@ export default async function handler(req, res) {
             syscall: err.cause.syscall,
             hostname: err.cause.hostname
           }
-        : nullgit
+        : null
     });
   }
 }
