@@ -16,9 +16,17 @@ Supabase / Credit
 （Androidの500回+100クレジット方式 と iOSの3回+買い切り方式の両対応）
 ========================= */
 
+const UNLIMITED_FLAG_VALUE = 999999;
 const FREE_QUOTA_DEFAULT = 500;
 const FREE_QUOTA_IOS_NEW = 3;
-const UNLIMITED_FLAG_VALUE = 999999;
+const FREE_QUOTA_ANDROID_AD = 10; // ★ 追加：Android広告付き無料版は10回
+
+// checkCredit 関数内 と consumeAfterSuccess 関数内の quota 計算部分を以下に変更：
+const quota = plan_type === "ios_unlimited"
+  ? FREE_QUOTA_IOS_NEW
+  : plan_type === "android_free_10"
+    ? FREE_QUOTA_ANDROID_AD
+    : FREE_QUOTA_DEFAULT;
 
 async function incrementUsage(user_id, delta = 1) {
   if (!hasSupabase || !user_id) return null;
