@@ -12,55 +12,74 @@ const supabase = hasSupabase
   : null;
 
 /* =========================
-Supabase / Credit
-（Android有料版500回+100クレジット / Android無料版10回 / iOS 3回+買い切り の全対応）
-========================= */
+ * 漫才 / コント モード判定 & ユーザーID分離ヘルパー
+ * ========================= */
+
+// リクエスト内容から「コント(conte)」か「漫才(manzai)」かを自動判定
+function detectAppMode(body = {}) {
+  const explicitMode = String(body.mode || body.app_mode || body.type || "").trim().toLowerCase();
+  if (explicitMode === "conte" || explicitMode === "skit" || explicitMode === "コント") {
+    return "conte";
+  }
+  if (explicitMode === "manzai" || explicitMode === "漫才") {
+    return "manzai";
+  }
+
+  const genre = String(body.genre || "").trim();
+  const theme = String(body.theme || "").trim();
+  const planType = String(body.plan_type || "").trim().toLowerCase();
+
+  if (
+    planType.includes("conte") ||
+    genre.includes("コント") ||
+    theme.includes("『コント") ||
+    theme.includes("コント（寸劇）")
+  ) {
+    return "conte";
+  }
+
+  // 選択された技法名にコント専用技法が含まれている場合もコントと判定
+  const allTechs = [
+    ...(Array.isArray(body.boke) ? body.boke : []),
+    ...(Array.isArray(body.tsukkomi) ? body.tsukkomi : []),
+    ...(Array.isArray(body.general) ? body.general : [])
+  ].join(" ");
+
+  if (/(キャラ憑依|状況ズレ|マイム|サイコパス|キレ芸|ノリツッコミ|伏線回収オチ|すれ違いコント)/.test(allTechs)) {
+    return "conte";
+  }
+
+  return "manzai";
+}
+
+// ★ 漫才とコントで Supabase 上のクレジット記録を完全に分けるため、
+//    コント時は user_id の先頭に "conte_" を付与する（漫才時はそのまま）
+function resolveScopedUserId(rawUserId, mode) {
+  const id = String(rawUserId || "").trim();
+  if (!id) return "";
+  if (mode === "conte") {
+    return id.startsWith("conte_") ? id : `conte_${id}`;
+  }
+  return id;
+}
+
+/* =========================
+ * Supabase / Credit 管理
+ * ========================= */
 
 const FREE_QUOTA_DEFAULT = 500;
 const FREE_QUOTA_IOS_NEW = 3;
-const FREE_QUOTA_ANDROID_AD = 10; // ★ Android広告付き無料版の上限（10回）
+const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
 
-// プラン種別に応じた無料枠上限を返すヘルパー関数
 function resolveQuotaByPlan(plan_type = "") {
-  if (plan_type === "ios_unlimited") return FREE_QUOTA_IOS_NEW;
-  if (plan_type === "android_free_10") return FREE_QUOTA_ANDROID_AD;
+  if (plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited") return FREE_QUOTA_IOS_NEW;
+  if (plan_type === "android_free_10" || plan_type === "conte_android_free_10") return FREE_QUOTA_ANDROID_AD;
   return FREE_QUOTA_DEFAULT;
 }
 
-async function incrementUsage(user_id, delta = 1) {
-  if (!hasSupabase || !user_id) return null;
-
-  try {
-    const { data, error } = await supabase
-      .from("user_usage")
-      .select("output_count")
-      .eq("user_id", user_id)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    const current = data?.output_count ?? 0;
-    const next = current + Math.max(delta, 0);
-
-    const { error: upErr } = await supabase
-      .from("user_usage")
-      .upsert({
-        user_id,
-        output_count: next,
-        updated_at: new Date().toISOString()
-      });
-
-    if (upErr) throw upErr;
-    return next;
-  } catch (e) {
-    console.warn("[supabase] incrementUsage failed:", e?.message || e);
-    return null;
-  }
-}
-
-async function getUsageRow(user_id) {
-  if (!hasSupabase || !user_id) {
+async function getUsageRow(scoped_user_id) {
+  if (!hasSupabase || !scoped_user_id) {
     return { output_count: 0, paid_credits: 0 };
   }
 
@@ -68,11 +87,10 @@ async function getUsageRow(user_id) {
     const { data, error } = await supabase
       .from("user_usage")
       .select("output_count, paid_credits")
-      .eq("user_id", user_id)
+      .eq("user_id", scoped_user_id)
       .maybeSingle();
 
     if (error) throw error;
-
     return data || { output_count: 0, paid_credits: 0 };
   } catch (e) {
     console.warn("[supabase] getUsageRow failed, bypassing credit check:", e?.message || e);
@@ -80,14 +98,14 @@ async function getUsageRow(user_id) {
   }
 }
 
-async function setUsageRow(user_id, { output_count, paid_credits }) {
-  if (!hasSupabase || !user_id) return;
+async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
+  if (!hasSupabase || !scoped_user_id) return;
 
   try {
     const { error } = await supabase
       .from("user_usage")
       .upsert({
-        user_id,
+        user_id: scoped_user_id,
         output_count,
         paid_credits,
         updated_at: new Date().toISOString()
@@ -99,15 +117,14 @@ async function setUsageRow(user_id, { output_count, paid_credits }) {
   }
 }
 
-async function checkCredit(user_id, plan_type = "") {
-  if (!hasSupabase || !user_id) {
+async function checkCredit(scoped_user_id, plan_type = "") {
+  if (!hasSupabase || !scoped_user_id) {
     return { ok: true, row: null };
   }
 
-  const row = await getUsageRow(user_id);
+  const row = await getUsageRow(scoped_user_id);
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
-
   const quota = resolveQuotaByPlan(plan_type);
 
   return {
@@ -116,23 +133,23 @@ async function checkCredit(user_id, plan_type = "") {
   };
 }
 
-async function consumeAfterSuccess(user_id, plan_type = "") {
-  if (!hasSupabase || !user_id) {
+async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
+  if (!hasSupabase || !scoped_user_id) {
     return { consumed: null, output_count: 0, paid_credits: 0 };
   }
 
   try {
-    const row = await getUsageRow(user_id);
+    const row = await getUsageRow(scoped_user_id);
     const used = row.output_count ?? 0;
     const paid = row.paid_credits ?? 0;
     const nextUsed = used + 1;
 
-    const isIosUnlimitedPlan = plan_type === "ios_unlimited";
+    const isIosUnlimitedPlan = plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited";
     const quota = resolveQuotaByPlan(plan_type);
 
     // 1. iOS買い切り済み or 無制限フラグ値の場合は paid_credits を減らさない
     if ((isIosUnlimitedPlan && paid > 0) || paid >= UNLIMITED_FLAG_VALUE) {
-      await setUsageRow(user_id, {
+      await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: paid
       });
@@ -145,7 +162,7 @@ async function consumeAfterSuccess(user_id, plan_type = "") {
 
     // 2. 無料枠内の消費
     if (used < quota) {
-      await setUsageRow(user_id, {
+      await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: paid
       });
@@ -156,10 +173,10 @@ async function consumeAfterSuccess(user_id, plan_type = "") {
       };
     }
 
-    // 3. Android等の従来型・有料クレジット消費（-1）
+    // 3. 有料クレジット消費（-1）
     if (paid > 0) {
       const nextPaid = paid - 1;
-      await setUsageRow(user_id, {
+      await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: nextPaid
       });
@@ -190,12 +207,12 @@ const PRODUCT_CREDIT_100 = "credit_100";
 const PRODUCT_UNLIMITED = "unlimited_unlock";
 const CREDIT_100_AMOUNT = 100;
 
-async function addCreditsForPurchase(user_id, product_id) {
-  if (!user_id) {
+async function addCreditsForPurchase(scoped_user_id, product_id) {
+  if (!scoped_user_id) {
     throw new Error("user_id missing");
   }
 
-  const row = await getUsageRow(user_id);
+  const row = await getUsageRow(scoped_user_id);
   const paid = row.paid_credits ?? 0;
   let nextPaid = paid;
 
@@ -209,7 +226,7 @@ async function addCreditsForPurchase(user_id, product_id) {
     throw err;
   }
 
-  await setUsageRow(user_id, {
+  await setUsageRow(scoped_user_id, {
     output_count: row.output_count ?? 0,
     paid_credits: nextPaid
   });
@@ -218,12 +235,12 @@ async function addCreditsForPurchase(user_id, product_id) {
 }
 
 /* =========================
-技法定義
-========================= */
+ * 漫才用の技法定義
+ * ========================= */
 
-const BOKE_DEFS = {
+const MANZAI_BOKE_DEFS = {
   IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
-  HIYU: "比喩ボケ：比喩で誇張してのボケ",
+  HIYU: "比喩ボケ：比喩で誇張してのボケ。",
   GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
   GIJI_RONRI: "擬似論理ボケ：論理風だが中身がズレているボケ。",
   TSUKKOMI_BOKE: "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
@@ -231,7 +248,7 @@ const BOKE_DEFS = {
   KOTOBA_ASOBI: "言葉遊び：ダジャレ・韻などで言語的にふざける。"
 };
 
-const TSUKKOMI_DEFS = {
+const MANZAI_TSUKKOMI_DEFS = {
   ODOROKI_GIMON: "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
   AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
   OKORI: "怒りツッコミ：怒ったような言い方でのツッコミ。",
@@ -239,7 +256,7 @@ const TSUKKOMI_DEFS = {
   META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
 };
 
-const GENERAL_DEFS = {
+const MANZAI_GENERAL_DEFS = {
   SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
   GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
   TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
@@ -248,7 +265,39 @@ const GENERAL_DEFS = {
   TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。"
 };
 
+/* =========================
+ * コント専用の技法定義
+ * ========================= */
+
+const CONTE_BOKE_DEFS = {
+  CHARA_HYOI: "キャラ憑依ボケ：強烈で独特なキャラクターになりきり、言動すべてで笑わせる。",
+  JOKYO_ZURE: "状況ズレボケ：その場のシチュエーションや空気と全く噛み合わない言動をとる。",
+  KODOGU_MIME: "小道具・マイムボケ：小道具や奇妙な動き・行動で視覚的・状況的にボケる。",
+  SENMON_RULE: "専門用語・独自ルール：謎の専門用語や自分だけのルールを当然のように押し通す。",
+  PSYCHOPATH: "狂気・サイコパス風：笑顔や冷静なトーンのまま、常識外れで少し怖いことをサラッと言う。",
+  TENDON: "天丼（繰り返しボケ）：同じボケやフレーズをタイミングを変えて繰り返し、笑いを増幅させる。",
+  BOYOMI: "棒読み・カタコト：感情がこもっていない不自然な話し方や挙動不審さで笑わせる。"
+};
+
+const CONTE_TSUKKOMI_DEFS = {
+  KONWAKU: "困惑・戸惑いツッコミ：異常なボケに対して、一般人の視点からリアルに困惑して戸惑う。",
+  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静なトーンで淡々と異常さを指摘する。",
+  KIREGEI: "キレ芸・絶叫ツッコミ：我慢の限界を超えて感情を爆発させ、勢いよくツッコむ。",
+  KOGOE_KOKORO: "小声・心の声ツッコミ：本人に聞こえないような小声や独り言で状況をツッコむ。",
+  NORI_TSUKKOMI: "ノリツッコミ：相手のボケの世界観に一度乗っかって演じてから、我に返ってツッコむ。"
+};
+
+const CONTE_GENERAL_DEFS = {
+  TACHIBA_GYAKUTEN: "立場逆転：最初は優位だった側（店員と客、上司と部下など）の立場が後半で完全に逆転する。",
+  KINCHO_KANWA: "緊張と緩和：シリアスで緊迫した空気を作ってから、くだらない一言で一気に脱力させる。",
+  FUKUSEN_KAISHU: "伏線回収オチ：序盤にさりげなく出した言葉や設定が、最後のオチで鮮やかに回収される。",
+  ESCALATE: "エスカレート構成：最初は小さな違和感だったボケが、徐々に巨大・異常にエスカレートしていく。",
+  SURECHIGAI: "すれ違いコント：お互いが別のことを思い込んだまま会話が成立してしまい、ズレが膨らむ。",
+  TENKAI_HAKAI: "展開破壊（シュール）：これまでの設定や流れをぶち壊す不条理な展開に突入する。"
+};
+
 const ALIAS_MAP = {
+  // 漫才用エイリアス
   "言い間違い／聞き間違い": "IIMACHIGAI",
   "比喩ボケ": "HIYU",
   "逆説ボケ": "GYAKUSETSU",
@@ -256,13 +305,11 @@ const ALIAS_MAP = {
   "ツッコミボケ": "TSUKKOMI_BOKE",
   "ボケの連鎖": "RENSA",
   "言葉遊び": "KOTOBA_ASOBI",
-
   "驚き・疑問ツッコミ": "ODOROKI_GIMON",
   "呆れ・冷静ツッコミ": "AKIRE_REISEI",
   "怒りツッコミ": "OKORI",
   "共感ツッコミ": "KYOKAN",
   "メタツッコミ": "META",
-
   "三段オチ": "SANDAN_OCHI",
   "逆張り構成": "GYAKUHARI",
   "展開破壊": "TENKAI_HAKAI",
@@ -274,7 +321,25 @@ const ALIAS_MAP = {
   "tenkaiHakai": "TENKAI_HAKAI",
   "kanchigaiTeisei": "KANCHIGAI_TEISEI",
   "surechigai": "SURECHIGAI",
-  "tachibaGyakuten": "TACHIBA_GYAKUTEN"
+  "tachibaGyakuten": "TACHIBA_GYAKUTEN",
+
+  // コント用エイリアス
+  "キャラ憑依ボケ": "CHARA_HYOI",
+  "状況ズレボケ": "JOKYO_ZURE",
+  "小道具・マイムボケ": "KODOGU_MIME",
+  "専門用語・独自ルール": "SENMON_RULE",
+  "狂気・サイコパス風": "PSYCHOPATH",
+  "天丼（繰り返しボケ）": "TENDON",
+  "棒読み・カタコト": "BOYOMI",
+  "困惑・戸惑いツッコミ": "KONWAKU",
+  "キレ芸・絶叫ツッコミ": "KIREGEI",
+  "小声・心の声ツッコミ": "KOGOE_KOKORO",
+  "ノリツッコミ": "NORI_TSUKKOMI",
+  "緊張と緩和": "KINCHO_KANWA",
+  "伏線回収オチ": "FUKUSEN_KAISHU",
+  "エスカレート構成": "ESCALATE",
+  "すれ違いコント": "SURECHIGAI",
+  "展開破壊（シュール）": "TENKAI_HAKAI"
 };
 
 function resolveTechKey(item, table) {
@@ -292,8 +357,8 @@ function resolveTechKey(item, table) {
 }
 
 /* =========================
-文字数・整形ユーティリティ
-========================= */
+ * 文字数・整形ユーティリティ
+ * ========================= */
 
 function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   if (!text) return "";
@@ -346,13 +411,12 @@ function detectTsukkomiSpeakerFromScript(text, fallbackName = "B") {
   return speakers.length >= 2 ? speakers[1] : fallbackName;
 }
 
-function ensureTsukkomiOutro(text, defaultTsukkomiName = "B") {
+function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
   const actualTsukkomi = detectTsukkomiSpeakerFromScript(text, defaultTsukkomiName);
   const outro = `${actualTsukkomi}: [叩く] もういいよ！`;
   if (!text) return outro;
 
   let t = text.trim();
-
   const alreadyHasNaturalEnding = /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
   if (alreadyHasNaturalEnding) {
     return t;
@@ -490,40 +554,44 @@ function ensureSingleTitle(titleIn, bodyIn) {
 }
 
 /* =========================
-ガイドライン・プロンプト作成
-========================= */
+ * ガイドライン・プロンプト作成（漫才・コント両対応）
+ * ========================= */
 
-function buildGuidelineFromSelections({ boke = [], tsukkomi = [], general = [] }) {
-  const bokeLines = boke
-    .map((k) => {
-      const key = resolveTechKey(k, BOKE_DEFS);
-      return key ? `- ${BOKE_DEFS[key]}` : `- ${k}`;
-    })
+function parseCharacterNames(charDesc) {
+  if (!charDesc) return { bokeName: "A", tsukkomiName: "B" };
+  const parts = String(charDesc)
+    .split(/[、,，／/・\n]+/)
+    .map((s) => s.trim())
     .filter(Boolean);
 
-  const tsukkomiLines = tsukkomi
-    .map((k) => {
-      const key = resolveTechKey(k, TSUKKOMI_DEFS);
-      return key ? `- ${TSUKKOMI_DEFS[key]}` : `- ${k}`;
-    })
-    .filter(Boolean);
-
-  const generalLines = general
-    .map((k) => {
-      const key = resolveTechKey(k, GENERAL_DEFS);
-      return key ? `- ${GENERAL_DEFS[key]}` : `- ${k}`;
-    })
-    .filter(Boolean);
-
-  const parts = [];
-  if (bokeLines.length) parts.push("【ボケ技法】", ...bokeLines);
-  if (tsukkomiLines.length) parts.push("【ツッコミ技法】", ...tsukkomiLines);
-  if (generalLines.length) parts.push("【全般の構成技法】", ...generalLines);
-
-  return parts.join("\n");
+  if (parts.length >= 2) {
+    const cleanName = (raw) =>
+      raw.replace(/[（(].*?[）)]/g, "").replace(/^(ボケ|ツッコミ|ボケ役|ツッコミ役)[:：]\s*/, "").trim();
+    const n1 = cleanName(parts[0]) || "A";
+    const n2 = cleanName(parts[1]) || "B";
+    return { bokeName: n1, tsukkomiName: n2 };
+  }
+  return { bokeName: "A", tsukkomiName: "B" };
 }
 
-function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
+function buildPromptByMode({
+  mode = "manzai",
+  theme = "",
+  genre = "",
+  characters = "",
+  length = 1000,
+  selected = {}
+}) {
+  const isConte = mode === "conte";
+
+  const bokeTable = isConte ? { ...MANZAI_BOKE_DEFS, ...CONTE_BOKE_DEFS } : MANZAI_BOKE_DEFS;
+  const tsukkomiTable = isConte ? { ...MANZAI_TSUKKOMI_DEFS, ...CONTE_TSUKKOMI_DEFS } : MANZAI_TSUKKOMI_DEFS;
+  const generalTable = isConte ? { ...MANZAI_GENERAL_DEFS, ...CONTE_GENERAL_DEFS } : MANZAI_GENERAL_DEFS;
+
+  const boke = Array.isArray(selected.boke) ? selected.boke : [];
+  const tsukkomi = Array.isArray(selected.tsukkomi) ? selected.tsukkomi : [];
+  const general = Array.isArray(selected.general) ? selected.general : [];
+
   const toLabel = (items, table) =>
     items
       .map((item) => {
@@ -535,47 +603,47 @@ function labelizeSelected({ boke = [], tsukkomi = [], general = [] }) {
       })
       .filter(Boolean);
 
-  return {
-    boke: toLabel(boke, BOKE_DEFS),
-    tsukkomi: toLabel(tsukkomi, TSUKKOMI_DEFS),
-    general: toLabel(general, GENERAL_DEFS)
+  const selectedLabels = {
+    boke: toLabel(boke, bokeTable),
+    tsukkomi: toLabel(tsukkomi, tsukkomiTable),
+    general: toLabel(general, generalTable)
   };
-}
 
-function parseCharacterNames(charDesc) {
-  if (!charDesc) return { bokeName: "A", tsukkomiName: "B" };
-  const parts = charDesc
-    .split(/[、,，／/・\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const bokeLines = boke.map((k) => {
+    const key = resolveTechKey(k, bokeTable);
+    return key ? `- ${bokeTable[key]}` : `- ${k}`;
+  }).filter(Boolean);
 
-  if (parts.length >= 2) {
-    const cleanName = (raw) => raw.replace(/[（(].*?[）)]/g, "").replace(/^(ボケ|ツッコミ)[:：]\s*/, "").trim();
-    const n1 = cleanName(parts[0]) || "A";
-    const n2 = cleanName(parts[1]) || "B";
-    return { bokeName: n1, tsukkomiName: n2 };
-  }
-  return { bokeName: "A", tsukkomiName: "B" };
-}
+  const tsukkomiLines = tsukkomi.map((k) => {
+    const key = resolveTechKey(k, tsukkomiTable);
+    return key ? `- ${tsukkomiTable[key]}` : `- ${k}`;
+  }).filter(Boolean);
 
-function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, selected = {} }) {
-  const boke = Array.isArray(selected.boke) ? selected.boke : [];
-  const tsukkomi = Array.isArray(selected.tsukkomi) ? selected.tsukkomi : [];
-  const general = Array.isArray(selected.general) ? selected.general : [];
+  const generalLines = general.map((k) => {
+    const key = resolveTechKey(k, generalTable);
+    return key ? `- ${generalTable[key]}` : `- ${k}`;
+  }).filter(Boolean);
 
-  const selectedLabels = labelizeSelected({ boke, tsukkomi, general });
-  const guideline = buildGuidelineFromSelections({ boke, tsukkomi, general });
+  const guidelineParts = [];
+  if (bokeLines.length) guidelineParts.push("【ボケ技法】", ...bokeLines);
+  if (tsukkomiLines.length) guidelineParts.push("【ツッコミ技法】", ...tsukkomiLines);
+  if (generalLines.length) guidelineParts.push("【全般の構成技法】", ...generalLines);
+  const guideline = guidelineParts.join("\n");
 
   const techniquesForMeta = [
     ...selectedLabels.boke,
     ...selectedLabels.tsukkomi,
     ...selectedLabels.general
   ];
-
   const structureMeta = [...selectedLabels.general];
 
-  const safeTheme = String(theme || "").trim() || "日常生活";
-  const safeGenre = String(genre || "").trim() || "漫才";
+  // iPhone版コントメーカーが付与した補助文「（※漫才ではなく〜）」があれば綺麗に除去して題材名を取り出す
+  const cleanedTheme = String(theme || "")
+    .replace(/（※漫才ではなく[\s\S]*?）/g, "")
+    .trim();
+
+  const safeTheme = cleanedTheme || (isConte ? "深夜のコンビニ" : "日常生活");
+  const safeGenre = String(genre || "").trim() || (isConte ? "コント" : "漫才");
   const charDesc = typeof characters === "string"
     ? characters.trim()
     : JSON.stringify(characters ?? "");
@@ -586,12 +654,85 @@ function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, s
     ? Math.floor(Number(length))
     : 1000;
 
-  const minLen = Math.max(1, Math.floor(targetLen * 0.9));
+  const minLen = Math.max(100, Math.floor(targetLen * 0.9));
   const maxLen = Math.max(minLen, Math.ceil(targetLen * 1.1));
 
   const techniqueText = techniquesForMeta.length
     ? techniquesForMeta.join("、")
     : "指定なし";
+
+  // ★ コント専用プロンプト
+  if (isConte) {
+    const systemPrompt = [
+      "あなたはキングオブコントの優勝ネタを数多く手掛けるプロのコント作家です。",
+      "舞台でそのまま演じられる、日本語のコント（寸劇）台本を作成してください。",
+      "説明やト書きではなく、完成したセリフの掛け合いだけを出力してください。",
+      "最初は日常的なシチュエーションから始まり、徐々にキャラクターの狂気やズレがエスカレートし、最後は鮮やかなオチで暗転する構成にしてください。",
+      "アプリのステージ演出（全身アクション・効果音）と連携するため、指定された演出タグを各セリフの先頭に必ず付けてください。"
+    ].join("\n");
+
+    const prompt = [
+      "以下の条件で、日本語のコント（寸劇）台本を1本作成してください。",
+      "",
+      `【シチュエーション・舞台設定】${safeTheme}`,
+      `【ジャンル・作風】${safeGenre}`,
+      `【登場人物・役柄】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
+      `※左側のボケ役を「${bokeName}」、右側のツッコミ役を「${tsukkomiName}」として台詞を書いてください。`,
+      `【目標文字数】${targetLen}文字（${minLen}〜${maxLen}文字程度）`,
+      "",
+      "【採用するコント技法】",
+      techniqueText,
+      "",
+      guideline ? "【技法ガイドライン】\n" + guideline : "",
+      "",
+      "【アプリ上演用の演出タグルール（重要）】",
+      "アプリ内でキャラクターが全身アクション・表情・効果音をつけるため、各セリフのコロン（:）の直後に、文脈に合った以下の演出タグを1つ付けてください。",
+      "- [通常] ：普通の会話や状況説明のセリフ（例: `A: [通常] すみません、これ温めてもらえますか？`）",
+      "- [ボケ] ：おどけたボケ、ズレた発言、奇妙な言動（例: `A: [ボケ] 僕、昨日から光合成だけで生きてるんですよ♪`）",
+      "- [演技] ：役柄になりきった芝居がかったセリフ、小道具を使うセリフ（例: `A: [演技] 「これよりオペを開始する！」…よし、メス！`）",
+      "- [キメ] ：ドヤ顔でカッコつける、謎のキメポーズをとるセリフ（例: `A: [キメ] フッ…何を隠そう、俺は伝説のコンビニ店員だ。`）",
+      "- [疑問] ：首をかしげる疑問や戸惑いの問いかけ（例: `B: [疑問] えっ、それどういう意味ですか？`）",
+      "- [呆れ] ：呆れたツッコミ、小声やため息混じりの冷静な指摘（例: `B: [呆れ] いや…あなたさっきから何言ってるんですか…。`）",
+      "- [ツッコミ] ：通常の勢いあるツッコミ・指摘（例: `B: [ツッコミ] いや逆でしょ！何やってんの！`）",
+      "- [叩く] ：コント後半のクライマックスに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選！）",
+      "- [ズッコケ] ：相手のあんまりなボケに拍子抜けして新喜劇風にズッコケるリアクション（例: `B: [ズッコケ] 知らんのかい！ズコーッ！`）",
+      "- [詰め寄る] ：相手の目の前までグッと顔を近づけて迫る・凄むセリフ（例: `B: [詰め寄る] おい、本当のことを白状しろよ…。`）",
+      "- [パニック] ：恐怖や混乱で顔面蒼白になりガタガタ震えるセリフ（例: `B: [パニック] ひぃぃぃ！ヤバいってこれ！助けてくれー！`）",
+      "- [土下座] ：床に頭を擦り付けて必死に謝罪・懇願するセリフ（例: `A: [土下座] すいませんでしたー！どうか命だけはー！`）",
+      "",
+      "【コントの出力ルール（厳守）】",
+      "- 漫才ではないため、冒頭の「どうもー！」や、最後の「もういいよ！」「もうええわ！」「ありがとうございました」は絶対に入れないでください。",
+      "- 照明が明転した瞬間から、すでにそのシチュエーションの役に入り込んだ第一声で始めてください。",
+      "- タイトルを最初に1つだけ出す（【】や「タイトル:」は付けずタイトル文字列のみ）。",
+      "- タイトルと本文の間には空行を1つ入れる。",
+      `- 本文は必ず「${bokeName}: [タグ] セリフ」「${tsukkomiName}: [タグ] セリフ」の形式にする。`,
+      "- 各台詞の間には空行を1つ入れる。",
+      "- 解説やト書きは一切出力せず、最後はコントらしい鮮やかで面白いオチのセリフ（暗転のキッカケになる一言）でピタッと終える。"
+    ].join("\n");
+
+    return {
+      systemPrompt,
+      prompt,
+      techniquesForMeta,
+      structureMeta,
+      maxLen,
+      minLen,
+      tsukkomiName,
+      targetLen,
+      safeTheme,
+      safeGenre,
+      charDesc
+    };
+  }
+
+  // ★ 漫才専用プロンプト
+  const systemPrompt = [
+    "あなたはM-1グランプリの決勝ネタを数多く手掛けるプロの漫才作家です。",
+    "舞台でそのまま使える、日本語の漫才台本を作成してください。",
+    "説明や分析ではなく、完成した台本だけを出力してください。",
+    "必ず自然な掛け合いと、伏線を回収する明確で面白いオチを作ってください。",
+    "アプリのステージ演出と連携するため、指定された演出タグ（[通常] [ボケ] [演技] [疑問] [呆れ] [ツッコミ] [叩く]）を各セリフの先頭に必ず付けてください。"
+  ].join("\n");
 
   const prompt = [
     "以下の条件で、日本語の漫才台本を1本作成してください。",
@@ -630,6 +771,7 @@ function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, s
   ].join("\n");
 
   return {
+    systemPrompt,
     prompt,
     techniquesForMeta,
     structureMeta,
@@ -644,8 +786,8 @@ function buildPrompt({ theme = "", genre = "", characters = "", length = 1000, s
 }
 
 /* =========================
-OpenAI クライアント
-========================= */
+ * OpenAI クライアント
+ * ========================= */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-6-luna";
@@ -750,8 +892,8 @@ function normalizeError(err) {
 }
 
 /* =========================
-メイン handler
-========================= */
+ * メイン handler
+ * ========================= */
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -762,34 +904,52 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const action = body.action || "generate";
 
-    // 1. 購入クレジット追加 / 買い切りアンロック
+    // ★ 漫才("manzai") か コント("conte") かを判定し、コントなら user_id を "conte_..." に分離する
+    const mode = detectAppMode(body);
+    const rawUserId = String(body.user_id || "").trim();
+    const scopedUserId = resolveScopedUserId(rawUserId, mode);
+
+    // 1. 購入クレジット追加 / 買い切りアンロック（漫才・コントそれぞれの枠に加算）
     if (action === "add_credits" || action === "add_credit") {
-      const user_id = String(body.user_id || "").trim();
       const product_id = String(body.product_id || "").trim();
 
-      if (!user_id) {
+      if (!scopedUserId) {
         return res.status(400).json({ error: "user_id is required" });
       }
       if (!product_id) {
         return res.status(400).json({ error: "product_id is required" });
       }
 
-      const paidCredits = await addCreditsForPurchase(user_id, product_id);
+      const paidCredits = await addCreditsForPurchase(scopedUserId, product_id);
 
       return res.status(200).json({
         ok: true,
-        user_id,
+        mode,
+        user_id: rawUserId,
+        scoped_user_id: scopedUserId,
         product_id,
         paid_credits: paidCredits
       });
     }
 
-    // 2. 通常生成
+    // 2. クレジット残高照会（action: "get_credit" が投げられた場合にも対応）
+    if (action === "get_credit" || action === "get_credits") {
+      const row = await getUsageRow(scopedUserId);
+      return res.status(200).json({
+        ok: true,
+        mode,
+        user_id: rawUserId,
+        output_count: row.output_count ?? 0,
+        usage_count: row.output_count ?? 0,
+        paid_credits: row.paid_credits ?? 0
+      });
+    }
+
+    // 3. 通常生成（漫才 または コント）
     if (action !== "generate") {
       return res.status(400).json({ error: "Unknown action" });
     }
 
-    const user_id = String(body.user_id || "").trim();
     const plan_type = String(body.plan_type || "").trim();
     const theme = String(body.theme || "").trim();
     const genre = String(body.genre || "").trim();
@@ -815,19 +975,21 @@ export default async function handler(req, res) {
           : []
     };
 
-    // クレジット確認
-    const credit = await checkCredit(user_id, plan_type);
+    // クレジット確認（漫才用・コント用で独立した scopedUserId でチェック）
+    const credit = await checkCredit(scopedUserId, plan_type);
     if (!credit.ok) {
       return res.status(402).json({
         error: "クレジットが不足しています。",
         code: "INSUFFICIENT_CREDITS",
+        mode,
         output_count: credit.row?.output_count ?? 0,
         paid_credits: credit.row?.paid_credits ?? 0
       });
     }
 
-    // プロンプト作成
+    // モード別プロンプト作成
     const {
+      systemPrompt,
       prompt,
       techniquesForMeta,
       structureMeta,
@@ -836,21 +998,15 @@ export default async function handler(req, res) {
       tsukkomiName,
       targetLen,
       safeTheme
-    } = buildPrompt({ theme, genre, characters, length, selected });
+    } = buildPromptByMode({ mode, theme, genre, characters, length, selected });
 
-    // 漫才生成
+    // OpenAI 呼び出し
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
         {
           role: "system",
-          content: [
-            "あなたはM-1グランプリの決勝ネタを数多く手掛けるプロの漫才作家です。",
-            "舞台でそのまま使える、日本語の漫才台本を作成してください。",
-            "説明や分析ではなく、完成した台本だけを出力してください。",
-            "必ず自然な掛け合いと、伏線を回収する明確で面白いオチを作ってください。",
-            "アプリのステージ演出と連携するため、指定された演出タグ（[通常] [ボケ] [演技] [疑問] [呆れ] [ツッコミ] [叩く]）を各セリフの先頭に必ず付けてください。"
-          ].join("\n")
+          content: systemPrompt
         },
         {
           role: "user",
@@ -876,13 +1032,18 @@ export default async function handler(req, res) {
     bodyText = normalizeSpeakerColons(bodyText);
     bodyText = ensureBlankLineBetweenTurns(bodyText);
     bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
-    bodyText = ensureTsukkomiOutro(bodyText, tsukkomiName);
 
-    // クレジット消費
-    const consumption = await consumeAfterSuccess(user_id, plan_type);
+    // ★ 漫才モードの時だけ末尾に「もういいよ！」を保証し、コントモードの時はオチのセリフでピタッと終える！
+    if (mode === "manzai") {
+      bodyText = ensureManzaiTsukkomiOutro(bodyText, tsukkomiName);
+    }
+
+    // クレジット消費（漫才・コントそれぞれの枠で消費）
+    const consumption = await consumeAfterSuccess(scopedUserId, plan_type);
 
     return res.status(200).json({
       ok: true,
+      mode,
       title,
       body: bodyText,
       text: bodyText,
@@ -890,6 +1051,7 @@ export default async function handler(req, res) {
       techniques: techniquesForMeta,
       structure: structureMeta,
       meta: {
+        mode,
         structure: structureMeta,
         techniques: techniquesForMeta,
         usage_count: consumption.output_count ?? 0,
@@ -898,7 +1060,7 @@ export default async function handler(req, res) {
       target_length: targetLen,
       min_length: minLen,
       max_length: maxLen,
-      tsukkomi_outro: `${tsukkomiName}: もういいよ！`,
+      tsukkomi_outro: mode === "manzai" ? `${tsukkomiName}: もういいよ！` : "",
       consumed: consumption.consumed ?? null
     });
   } catch (err) {
@@ -916,7 +1078,7 @@ export default async function handler(req, res) {
             message: err.cause.message,
             code: err.cause.code,
             errno: err.cause.errno,
-            syscall: err.cause.syscall,
+            syscall: err.cause.errno,
             hostname: err.cause.hostname
           }
         : null
