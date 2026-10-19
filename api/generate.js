@@ -116,7 +116,7 @@ async function getUsageRow(user_id) {
       }
     );
   } catch (e) {
-    // Supabaseが休止中や接続エラーでも止まらずに無料枠扱いで通過させる
+    // ★ Supabaseが休止中(ENOTFOUND)や接続エラーでも止まらずに通過させる
     console.warn(
       "[supabase] getUsageRow failed, bypassing credit check:",
       e?.message || e
@@ -145,19 +145,27 @@ async function setUsageRow(
     return;
   }
 
-  const { error } =
-    await supabase
-      .from("user_usage")
-      .upsert({
-        user_id,
-        output_count,
-        paid_credits,
-        updated_at:
-          new Date().toISOString()
-      });
+  try {
+    const { error } =
+      await supabase
+        .from("user_usage")
+        .upsert({
+          user_id,
+          output_count,
+          paid_credits,
+          updated_at:
+            new Date().toISOString()
+        });
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+  } catch (e) {
+    // ★ 書き込み時もSupabaseエラーで全体を落とさないように保護
+    console.warn(
+      "[supabase] setUsageRow failed:",
+      e?.message || e
+    );
   }
 }
 
@@ -206,7 +214,9 @@ async function consumeAfterSuccess(
     !user_id
   ) {
     return {
-      consumed: null
+      consumed: null,
+      output_count: 0,
+      paid_credits: 0
     };
   }
 
@@ -228,11 +238,13 @@ async function consumeAfterSuccess(
       used < FREE_QUOTA
     ) {
 
+      const nextUsed = used + 1;
+
       await setUsageRow(
         user_id,
         {
           output_count:
-            used + 1,
+            nextUsed,
 
           paid_credits:
             paid
@@ -241,33 +253,46 @@ async function consumeAfterSuccess(
 
       return {
         consumed:
-          "free"
+          "free",
+        output_count:
+          nextUsed,
+        paid_credits:
+          paid
       };
     }
 
 
     if (paid > 0) {
 
+      const nextUsed = used + 1;
+      const nextPaid = paid - 1;
+
       await setUsageRow(
         user_id,
         {
           output_count:
-            used + 1,
+            nextUsed,
 
           paid_credits:
-            paid - 1
+            nextPaid
         }
       );
 
       return {
         consumed:
-          "paid"
+          "paid",
+        output_count:
+          nextUsed,
+        paid_credits:
+          nextPaid
       };
     }
 
 
     return {
-      consumed: null
+      consumed: null,
+      output_count: used,
+      paid_credits: paid
     };
 
   } catch (e) {
@@ -279,6 +304,8 @@ async function consumeAfterSuccess(
 
     return {
       consumed: null,
+      output_count: 0,
+      paid_credits: 0,
       error:
         e?.message ||
         String(e)
@@ -299,12 +326,9 @@ async function addCreditsForPurchase(
   product_id
 ) {
 
-  if (
-    !hasSupabase ||
-    !user_id
-  ) {
+  if (!user_id) {
     throw new Error(
-      "Supabase not configured or user_id missing"
+      "user_id missing"
     );
   }
 
@@ -373,7 +397,7 @@ const BOKE_DEFS = {
     "擬似論理ボケ：論理風だが中身がズレているボケ。",
 
   TSUKKOMI_BOKE:
-    "ツッコミの発言が次のボケの伏線になるボケ。",
+    "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
 
   RENSA:
     "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
@@ -425,6 +449,54 @@ const GENERAL_DEFS = {
     "立場逆転：途中または終盤で役割・地位がひっくり返る。"
 
 };
+
+
+// ★ iPhoneアプリから日本語名やcamelCaseで送られてきても定義キーに変換するヘルパー
+const ALIAS_MAP = {
+  // ボケ（日本語名）
+  "言い間違い／聞き間違い": "IIMACHIGAI",
+  "比喩ボケ": "HIYU",
+  "逆説ボケ": "GYAKUSETSU",
+  "擬似論理ボケ": "GIJI_RONRI",
+  "ツッコミボケ": "TSUKKOMI_BOKE",
+  "ボケの連鎖": "RENSA",
+  "言葉遊び": "KOTOBA_ASOBI",
+
+  // ツッコミ（日本語名）
+  "驚き・疑問ツッコミ": "ODOROKI_GIMON",
+  "呆れ・冷静ツッコミ": "AKIRE_REISEI",
+  "怒りツッコミ": "OKORI",
+  "共感ツッコミ": "KYOKAN",
+  "メタツッコミ": "META",
+
+  // 全般構成（日本語名 & GeneralTech.swift の rawValue）
+  "三段オチ": "SANDAN_OCHI",
+  "逆張り構成": "GYAKUHARI",
+  "展開破壊": "TENKAI_HAKAI",
+  "勘違い→訂正": "KANCHIGAI_TEISEI",
+  "すれ違い": "SURECHIGAI",
+  "立場逆転": "TACHIBA_GYAKUTEN",
+  "sandanOchi": "SANDAN_OCHI",
+  "gyakuhari": "GYAKUHARI",
+  "tenkaiHakai": "TENKAI_HAKAI",
+  "kanchigaiTeisei": "KANCHIGAI_TEISEI",
+  "surechigai": "SURECHIGAI",
+  "tachibaGyakuten": "TACHIBA_GYAKUTEN"
+};
+
+function resolveTechKey(item, table) {
+  const s = String(item || "").trim();
+  if (!s) return null;
+  if (table[s]) return s;
+  if (ALIAS_MAP[s] && table[ALIAS_MAP[s]]) return ALIAS_MAP[s];
+  for (const [k, def] of Object.entries(table)) {
+    const label = def.split("：")[0].trim();
+    if (label === s || def.startsWith(s)) {
+      return k;
+    }
+  }
+  return null;
+}
 
 
 const MUST_HAVE_TECH =
@@ -961,38 +1033,29 @@ function buildGuidelineFromSelections({
 
   const bokeLines =
     boke
-      .filter(
-        (k) =>
-          BOKE_DEFS[k]
-      )
-      .map(
-        (k) =>
-          `- ${BOKE_DEFS[k]}`
-      );
+      .map((k) => {
+        const key = resolveTechKey(k, BOKE_DEFS);
+        return key ? `- ${BOKE_DEFS[key]}` : `- ${k}`;
+      })
+      .filter(Boolean);
 
 
   const tsukkomiLines =
     tsukkomi
-      .filter(
-        (k) =>
-          TSUKKOMI_DEFS[k]
-      )
-      .map(
-        (k) =>
-          `- ${TSUKKOMI_DEFS[k]}`
-      );
+      .map((k) => {
+        const key = resolveTechKey(k, TSUKKOMI_DEFS);
+        return key ? `- ${TSUKKOMI_DEFS[key]}` : `- ${k}`;
+      })
+      .filter(Boolean);
 
 
   const generalLines =
     general
-      .filter(
-        (k) =>
-          GENERAL_DEFS[k]
-      )
-      .map(
-        (k) =>
-          `- ${GENERAL_DEFS[k]}`
-      );
+      .map((k) => {
+        const key = resolveTechKey(k, GENERAL_DEFS);
+        return key ? `- ${GENERAL_DEFS[key]}` : `- ${k}`;
+      })
+      .filter(Boolean);
 
 
   const parts = [];
@@ -1049,27 +1112,19 @@ function labelizeSelected({
 
   const toLabel =
     (
-      ids,
+      items,
       table
     ) =>
-      ids
-        .filter(
-          (k) =>
-            table[k]
-        )
-        .map(
-          (k) =>
-            table[k].split(
-              "」"
-            )[0]
-        )
-        .map(
-          (s) =>
-            s.replace(
-              /^.*?：?/,
-              ""
-            )
-        );
+      items
+        .map((item) => {
+          const key = resolveTechKey(item, table);
+          if (key && table[key]) {
+            // 「技法名：説明文」から「技法名」を取り出す
+            return table[key].split("：")[0].trim();
+          }
+          return String(item || "").trim();
+        })
+        .filter(Boolean);
 
 
   return {
@@ -1896,11 +1951,14 @@ export default async function handler(
 
     /* =========================
     購入クレジット追加
+    （iPhone側の "add_credit" と "add_credits" 両対応）
     ========================= */
 
     if (
       action ===
-      "add_credits"
+        "add_credits" ||
+      action ===
+        "add_credit"
     ) {
 
       const user_id =
@@ -2014,10 +2072,32 @@ export default async function handler(
       );
 
 
-    const selected =
+    // ★ iPhoneアプリ（DTOs.swift）のトップレベル boke / tsukkomi / general にも対応
+    const rawSelected =
       body.selected ||
       body.techniques ||
       {};
+
+    const selected = {
+      boke:
+        Array.isArray(rawSelected.boke)
+          ? rawSelected.boke
+          : Array.isArray(body.boke)
+            ? body.boke
+            : [],
+      tsukkomi:
+        Array.isArray(rawSelected.tsukkomi)
+          ? rawSelected.tsukkomi
+          : Array.isArray(body.tsukkomi)
+            ? body.tsukkomi
+            : [],
+      general:
+        Array.isArray(rawSelected.general)
+          ? rawSelected.general
+          : Array.isArray(body.general)
+            ? body.general
+            : []
+    };
 
 
     /* =========================
@@ -2357,8 +2437,6 @@ export default async function handler(
     /*
      * ★★★★★★★★★★★★★★★★★★★★★
      *
-     * ここが今回の1か所だけの修正箇所
-     *
      * 文字数制限で末尾が切られた場合でも、
      * 最終的に必ず「もういいよ！」を付ける。
      *
@@ -2488,7 +2566,7 @@ export default async function handler(
 
 
     /* =========================
-    レスポンス
+    レスポンス（iPhoneのDTOs.swiftにある meta に対応）
     ========================= */
 
     return res
@@ -2513,6 +2591,17 @@ export default async function handler(
 
         structure:
           structureMeta,
+
+        meta: {
+          structure:
+            structureMeta,
+          techniques:
+            techniquesForMeta,
+          usage_count:
+            consumption.output_count ?? 0,
+          paid_credits:
+            consumption.paid_credits ?? 0
+        },
 
         target_length:
           targetLen,
