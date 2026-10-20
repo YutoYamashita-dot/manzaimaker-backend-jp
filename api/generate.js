@@ -352,7 +352,6 @@ function resolveTechKey(item, table) {
  * 文字数・整形ユーティリティ
  * ========================= */
 
-// 舞台設定メタ行（STAGE / LEFT_COSTUME / RIGHT_COSTUME）を抽出して本文から除去
 function extractStageMetaAndClean(rawText) {
   let stageStyle = "";
   let leftCostume = "";
@@ -689,14 +688,20 @@ function buildPromptByMode({
     ? techniquesForMeta.join("、")
     : "指定なし";
 
-  // ★ コント専用プロンプト（舞台設備・衣装コード出力＋ステージを大きく動くタグ指定）
-   if (isConte) {
+  // ★ コント専用プロンプト（人間・動物・物の配役コード対応＋シュール＆面白さ強化）
+  if (isConte) {
     const systemPrompt = [
-      "あなたはキングオブコントの優勝ネタを数多く手掛けるプロのコント作家です。",
-      "舞台でそのまま演じられる、日本語のコント（寸劇）台本を作成してください。",
+      "あなたはキングオブコントの優勝ネタを数多く手掛ける天才コント作家です。",
+      "舞台でそのまま演じられる、最高に面白おかしくて笑える日本語のコント（寸劇）台本を作成してください。",
       "説明やト書きではなく、指定された舞台メタ情報とタイトル、完成したセリフの掛け合いだけを出力してください。",
-      "最初は日常的なシチュエーションから始まり、徐々にキャラクターの狂気やズレがエスカレートし、最後は鮮やかなオチで暗転する構成にしてください。",
+      "登場人物に『動物（犬・猫・パンダ・タコ・ペンギン・宇宙人など）』や『物（冷蔵庫・スマホ・おにぎり・りんご・信号機・聖剣・トイレ・ロボットなど）』が含まれている場合は、その動物の習性や、無機物ならではの機能・視点（冷やす、充電が減る、食べられる恐怖、扉を開け閉めされる等）をフル活用したシュールで抱腹絶倒のボケとツッコミを展開してください。",
       "2人は基本的には定位置で立ち止まって会話し、詰め寄る・逃げる・隠れる・作業するなど『動きに明確な意味がある場面』でのみ移動タグを使ってください。"
+    ].join("\n");
+
+    const costumeCodesList = [
+      "【人間の衣装】CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN",
+      "【動物の姿】ANIMAL_DOG (犬・狼) / ANIMAL_CAT (猫・虎・ライオン) / ANIMAL_BEAR_PANDA (クマ・パンダ・ゴリラ・猿) / ANIMAL_RABBIT (ウサギ) / ANIMAL_BIRD_PENGUIN (鳥・ペンギン・ニワトリ) / ANIMAL_OCTOPUS (タコ・イカ・海洋生物) / ANIMAL_ALIEN (宇宙人・地球外生命体)",
+      "【物の姿】OBJECT_FRIDGE (冷蔵庫・テレビ・電子レンジ等の四角い家電) / OBJECT_SMARTPHONE (スマホ・パソコン・時計) / OBJECT_APPLE (りんご・トマト・みかん等の丸い食べ物) / OBJECT_ONIGIRI (おにぎり・寿司・パン等の食べ物) / OBJECT_TRAFFIC_LIGHT (信号機・標識) / OBJECT_SWORD (剣・文房具・傘・ハサミ等の細長い道具) / OBJECT_TOILET (トイレ・便器・日用品) / OBJECT_ROBOT (AIロボット・掃除機ロボ・メカ)"
     ].join("\n");
 
     const prompt = [
@@ -704,7 +709,7 @@ function buildPromptByMode({
       "",
       `【シチュエーション・舞台設定】${safeTheme}`,
       `【ジャンル・作風】${safeGenre}`,
-      `【登場人物・役柄】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
+      `【登場人物・配役】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
       `※左側のボケ役を「${bokeName}」、右側のツッコミ役を「${tsukkomiName}」として台詞を書いてください。`,
       `【目標文字数】${targetLen}文字（${minLen}〜${maxLen}文字程度）`,
       "",
@@ -713,12 +718,12 @@ function buildPromptByMode({
       "",
       guideline ? "【技法ガイドライン】\n" + guideline : "",
       "",
-      "【舞台セットと衣装の指定（最優先・必須）】",
-      "アプリのステージ背景と2人の衣装を設定に一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
-      "※重要：もし今回のシチュエーションや役柄にぴったり合うものが選択肢に無い場合は、無理に選ばず必ず STAGE は `NONE`（設備なし）、衣装は `CASUAL_PLAIN`（衣装なし）を指定してください。",
-      "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING / NONE から1つ)",
-      `LEFT_COSTUME: (${bokeName}の衣装を CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN から1つ。該当しない場合は CASUAL_PLAIN)`,
-      `RIGHT_COSTUME: (${tsukkomiName}の衣装を上記リストから1つ。該当しない場合は CASUAL_PLAIN)`,
+      "【舞台セットと演者の姿・衣装の指定（最優先・必須）】",
+      "アプリのステージ背景と2人の姿（人間・動物・物）を完全一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
+      "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING / NONE から1つ。合わない場合は NONE)",
+      `LEFT_COSTUME: (${bokeName}の衣装または動物・物の姿を下記コードから1つ選択)`,
+      `RIGHT_COSTUME: (${tsukkomiName}の衣装または動物・物の姿を下記コードから1つ選択)`,
+      costumeCodesList,
       "",
       "【アプリ上演用の演出タグルール（重要）】",
       "基本的には2人が立ち止まって会話し、意味のある場面でのみ移動や特殊リアクションを行うよう、各セリフのコロン（:）の直後に以下のタグを1つ付けてください。",
@@ -728,7 +733,7 @@ function buildPromptByMode({
       "- [疑問] ：首をかしげる疑問や問いかけ",
       "- [呆れ] ：呆れたツッコミ、ため息混じりに冷静に指摘する",
       "- [ツッコミ] ：勢いよくツッコむ・指摘する",
-      "- [驚愕] ：相手の衝撃的な発言や事態にすごく驚いて「目玉がビョーンと飛び出る」大リアクション（※台本中で本当に驚く決定的な場面で1〜2回使用！ 例: `B: [驚愕] ええええ！？お前、人間じゃなかったのかよ！？`）",
+      "- [驚愕] ：相手の衝撃的な発言や事態にすごく驚いて「目玉がビョーンと飛び出る」大リアクション（※台本中で本当に驚く決定的な場面で1〜2回使用！）",
       "- [叩く] ：コント後半のクライマックスに入れる「渾身の強ツッコミ」（※台本全体で1〜2回に厳選）",
       "- [ズッコケ] ：相手のボケに拍子抜けして床にひっくり返る",
       "- [キメ] ：ドヤ顔でカッコつける・キメポーズをとる",
@@ -787,13 +792,13 @@ function buildPromptByMode({
     "",
     "【アプリ上演用の演出タグルール（重要）】",
     "アプリ内でキャラクターが動き・声色・効果音をつけるため、各セリフのコロン（:）の直後に、文脈に合った以下の演出タグを1つ付けてください。",
-    "- [通常] ：普通の会話やフリのセリフ（例: `A: [通常] 最近ちょっと悩みがありましてね。`）",
-    "- [ボケ] ：おどけたボケ、アホな発言、ズレた発言（例: `A: [ボケ] だから僕、昨日から光合成だけで生きてるんです♪`）",
-    "- [演技] ：コント風のなりきり、モノマネ、カギカッコ付きのセリフ（例: `A: [演技] 「いらっしゃいませー！ご注文は？」ってね。`）",
-    "- [疑問] ：首をかしげる疑問や問いかけ（例: `B: [疑問] えっ、それどういうことなん？`）",
-    "- [呆れ] ：呆れたツッコミ、ため息混じりの冷静な指摘（例: `B: [呆れ] いや…お前それ本気で言うてんの…？`）",
-    "- [ツッコミ] ：通常の勢いあるツッコミ・指摘（例: `B: [ツッコミ] いや逆やろ！何してんねん！`）",
-    "- [叩く] ：ネタ後半のクライマックスや決定的な瞬間、または最後の締めに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選すること！ 例: `B: [叩く] なんでやねん！いい加減にしろ！`）",
+    "- [通常] ：普通の会話やフリのセリフ",
+    "- [ボケ] ：おどけたボケ、アホな発言、ズレた発言",
+    "- [演技] ：コント風のなりきり、モノマネ、カギカッコ付きのセリフ",
+    "- [疑問] ：首をかしげる疑問や問いかけ",
+    "- [呆れ] ：呆れたツッコミ、ため息混じりの冷静な指摘",
+    "- [ツッコミ] ：通常の勢いあるツッコミ・指摘",
+    "- [叩く] ：ネタ後半のクライマックスや決定的な瞬間、または最後の締めに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選すること！）",
     "",
     "【出力ルール】",
     "- タイトルを最初に1つだけ出す（【】や「タイトル:」は付けずタイトル文字列のみ）。",
@@ -981,37 +986,29 @@ export default async function handler(req, res) {
       });
     }
 
-    // ★ 3. AIによる「おまかせ設定（コント設定ガチャ）」自動生成（クレジット消費なし）
+    // ★ 3. AIによる「おまかせ設定（カオス設定＆動物・物の珍配役ガチャ）」自動生成
     if (action === "random_preset" || action === "generate_preset") {
       const categories = [
-        "コンビニ・スーパー・接客",
-        "警察の取調室・探偵・裁判",
-        "病院の診察室・手術室・薬局",
-        "学校の教室・職員室・部活",
-        "高級レストラン・カフェ・寿司屋",
-        "会社の採用面接・社長室・会議",
-        "銀行強盗・怪盗・立てこもり",
-        "ファンタジー（魔王城・勇者・時代劇）",
-        "タクシー車内・電車・飛行機",
-        "美容室・カリスマ美容師",
-        "スポーツジム・ボクシング・格闘技",
-        "テレビ番組スタジオ・通販番組・インタビュー",
-        "駅のホーム・改札・待ち合わせ",
-        "実家のお茶の間・家族会議"
+        "【擬人化・物×人間】コンビニの廃棄寸前のおにぎりや冷蔵庫・スマホ・信号機・手術室のメスなどが急に喋り出して人間に文句を言うコント",
+        "【動物×人間】警察の取調室や会社の採用面接・タクシー・美容室なのに、片方がどう見ても『喋る犬・猫・ゴリラ・タコ・パンダ・ペンギン』なコント",
+        "【物×物・動物×物】真夜中のキッチンで『毒舌な冷蔵庫と飼い猫』や『意識高い系のりんごと賞味期限切れのおにぎり』『充電2%のスマホとAIロボット』が言い争うコント",
+        "【カオス立場逆転】銀行強盗・魔王城・病院の手術室・高級フレンチなどで、絶対にありえない異常事態や立場の逆転が起きる爆笑コント"
       ];
       const pickCat = categories[Math.floor(Math.random() * categories.length)];
 
       const presetPrompt = [
-        "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
-        `「${pickCat}」に関連する、思わず見たくなる最高に面白くてユニークな2人コントの設定を1つ考案してください。`,
-        "毎回違う斬新な切り口にし、以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
-        '{ "theme": "具体的な舞台・シチュエーション（18文字以内）", "genre": "作風・ジャンル（12文字以内）", "characters": "ボケ役の具体的な役名（12文字以内）, ツッコミ役の具体的な役名（12文字以内）" }'
+        "あなたはキングオブコントの優勝ネタを手掛ける日本一のコント作家です。",
+        `テーマ方向性：「${pickCat}」`,
+        "設定を見ただけで思わず吹き出してしまうような、最高に面白おかしくてシュールな2人コントの設定を1つ考案してください。",
+        "登場人物には人間だけでなく『動物（犬・猫・パンダ・ゴリラ・タコ・ペンギン・宇宙人など）』や『物（冷蔵庫・スマホ・りんご・おにぎり・信号機・聖剣・トイレ・ロボットなど）』を積極的に配役に任命してください。",
+        "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
+        '{ "theme": "具体的で面白い舞台・異常な状況（22文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な役名（15文字以内）, ツッコミ役の具体的な役名（15文字以内）" }'
       ].join("\n");
 
       const aiResp = await client.chat.completions.create({
         model: OPENAI_MODEL,
         messages: [
-          { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
+          { role: "system", content: "JSONのみを出力する天才コント設定クリエイター" },
           { role: "user", content: presetPrompt }
         ]
       });
@@ -1031,9 +1028,9 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        theme: String(parsed?.theme || "深夜のコンビニ").trim(),
-        genre: String(parsed?.genre || "日常×シュール").trim(),
-        characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
+        theme: String(parsed?.theme || "深夜のコンビニ・廃棄寸前の棚").trim(),
+        genre: String(parsed?.genre || "擬人化×シュール").trim(),
+        characters: String(parsed?.characters || "プライドが高すぎる高級おにぎり, 値引きシールを貼る店員").trim()
       });
     }
 
@@ -1112,7 +1109,6 @@ export default async function handler(req, res) {
       .replace(/\s*```$/i, "")
       .trim();
 
-    // 舞台・衣装メタ行を抽出して本文から切り離す
     const { cleanedRaw, stageStyle, leftCostume, rightCostume } = extractStageMetaAndClean(raw);
 
     let { title, body: generatedBody } = splitTitleAndBody(cleanedRaw);
@@ -1131,7 +1127,6 @@ export default async function handler(req, res) {
 
     const consumption = await consumeAfterSuccess(scopedUserId, plan_type);
 
-    // アプリ側が舞台設備と衣装を100%特定できる複合セッティング文字列
     const fullSettingInfo = [
       safeTheme,
       safeGenre,
