@@ -690,13 +690,13 @@ function buildPromptByMode({
     : "指定なし";
 
   // ★ コント専用プロンプト（舞台設備・衣装コード出力＋ステージを大きく動くタグ指定）
-  if (isConte) {
+   if (isConte) {
     const systemPrompt = [
       "あなたはキングオブコントの優勝ネタを数多く手掛けるプロのコント作家です。",
       "舞台でそのまま演じられる、日本語のコント（寸劇）台本を作成してください。",
       "説明やト書きではなく、指定された舞台メタ情報とタイトル、完成したセリフの掛け合いだけを出力してください。",
       "最初は日常的なシチュエーションから始まり、徐々にキャラクターの狂気やズレがエスカレートし、最後は鮮やかなオチで暗転する構成にしてください。",
-      "棒人間キャラクターがステージの左右・奥・手前をダイナミックに動き回って演じるため、移動やアクションを表す演出タグを積極的に使い分けてください。"
+      "2人は基本的には定位置で立ち止まって会話し、詰め寄る・逃げる・隠れる・作業するなど『動きに明確な意味がある場面』でのみ移動タグを使ってください。"
     ].join("\n");
 
     const prompt = [
@@ -714,30 +714,29 @@ function buildPromptByMode({
       guideline ? "【技法ガイドライン】\n" + guideline : "",
       "",
       "【舞台セットと衣装の指定（最優先・必須）】",
-      "アプリのステージ背景と2人の衣装を設定に完全一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
-      "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING から最も合うものを1つ)",
-      `LEFT_COSTUME: (${bokeName}の衣装を CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN から1つ)`,
-      `RIGHT_COSTUME: (${tsukkomiName}の衣装を上記リストから1つ)`,
+      "アプリのステージ背景と2人の衣装を設定に一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
+      "※重要：もし今回のシチュエーションや役柄にぴったり合うものが選択肢に無い場合は、無理に選ばず必ず STAGE は `NONE`（設備なし）、衣装は `CASUAL_PLAIN`（衣装なし）を指定してください。",
+      "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING / NONE から1つ)",
+      `LEFT_COSTUME: (${bokeName}の衣装を CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN から1つ。該当しない場合は CASUAL_PLAIN)`,
+      `RIGHT_COSTUME: (${tsukkomiName}の衣装を上記リストから1つ。該当しない場合は CASUAL_PLAIN)`,
       "",
-      "【アプリ上演用の演出・ステージ移動タグルール（重要）】",
-      "コントらしく舞台の左右・上下（奥・手前）を広く使って動き回るため、各セリフのコロン（:）の直後に、文脈に合った以下のタグを1つ付けてください。",
-      "- [登場] ：舞台の端から歩いて登場する・駆け寄る（冒頭や場面転換時）",
-      "- [通常] ：通常の会話",
-      "- [作業] ：その場のカウンターや机・設備で作業や身振りをする",
-      "- [歩き回る] ：ステージ上をウロウロ歩き回りながら話す・落ち着きなく動く",
-      "- [ボケ] ：前に出ておどけたボケ、ズレた発言、奇妙な言動をする",
-      "- [演技] ：ステージを大きく使って役柄になりきった芝居・マイムをする",
-      "- [キメ] ：ステージ手前に出てドヤ顔でカッコつける・キメポーズをとる",
-      "- [詰め寄る] ：相手の目の前までグッと歩いて迫る・圧をかける",
-      "- [逃げる] ：驚いたり怖がったりしてステージの端や奥へ後ずさりして離れる",
-      "- [隠れる] ：物陰やステージ奥へ身を潜める・様子をうかがう",
-      "- [疑問] ：首をかしげる疑問や戸惑いの問いかけ",
-      "- [呆れ] ：呆れたツッコミ、一歩引いて冷静に指摘する",
-      "- [ツッコミ] ：相手に歩み寄って勢いよくツッコむ・指摘する",
+      "【アプリ上演用の演出タグルール（重要）】",
+      "基本的には2人が立ち止まって会話し、意味のある場面でのみ移動や特殊リアクションを行うよう、各セリフのコロン（:）の直後に以下のタグを1つ付けてください。",
+      "- [通常] ：立ち止まって通常の会話をする",
+      "- [ボケ] ：立ち止まっておどけたボケ、ズレた発言をする",
+      "- [演技] ：役柄になりきった芝居・マイムをする",
+      "- [疑問] ：首をかしげる疑問や問いかけ",
+      "- [呆れ] ：呆れたツッコミ、ため息混じりに冷静に指摘する",
+      "- [ツッコミ] ：勢いよくツッコむ・指摘する",
+      "- [驚愕] ：相手の衝撃的な発言や事態にすごく驚いて「目玉がビョーンと飛び出る」大リアクション（※台本中で本当に驚く決定的な場面で1〜2回使用！ 例: `B: [驚愕] ええええ！？お前、人間じゃなかったのかよ！？`）",
       "- [叩く] ：コント後半のクライマックスに入れる「渾身の強ツッコミ」（※台本全体で1〜2回に厳選）",
-      "- [ズッコケ] ：相手のボケに拍子抜けして床に派手にひっくり返る",
-      "- [パニック] ：恐怖や混乱でステージ上を右往左往してガタガタ震える",
+      "- [ズッコケ] ：相手のボケに拍子抜けして床にひっくり返る",
+      "- [キメ] ：ドヤ顔でカッコつける・キメポーズをとる",
       "- [土下座] ：床に頭を擦り付けて必死に謝罪・懇願する",
+      "- [作業] ：（意味のある移動）カウンターや机・設備に歩み寄って作業する",
+      "- [詰め寄る] ：（意味のある移動）相手の目の前までグッと歩いて迫る・圧をかける",
+      "- [逃げる] ：（意味のある移動）怖がったり驚いたりして舞台の端へ後ずさりして離れる",
+      "- [隠れる] ：（意味のある移動）舞台の奥へ身を潜める",
       "",
       "【コントの出力フォーマット（厳守）】",
       "1〜3行目：STAGE / LEFT_COSTUME / RIGHT_COSTUME の指定",
