@@ -1,3 +1,4 @@
+// api/generate.js
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -15,7 +16,6 @@ const supabase = hasSupabase
  * 漫才 / コント モード判定 & ユーザーID分離ヘルパー
  * ========================= */
 
-// リクエスト内容から「コント(conte)」か「漫才(manzai)」かを自動判定
 function detectAppMode(body = {}) {
   const explicitMode = String(body.mode || body.app_mode || body.type || "").trim().toLowerCase();
   if (explicitMode === "conte" || explicitMode === "skit" || explicitMode === "コント") {
@@ -38,7 +38,6 @@ function detectAppMode(body = {}) {
     return "conte";
   }
 
-  // 選択された技法名にコント専用技法が含まれている場合もコントと判定
   const allTechs = [
     ...(Array.isArray(body.boke) ? body.boke : []),
     ...(Array.isArray(body.tsukkomi) ? body.tsukkomi : []),
@@ -52,8 +51,6 @@ function detectAppMode(body = {}) {
   return "manzai";
 }
 
-// ★ 漫才とコントで Supabase 上のクレジット記録を完全に分けるため、
-//    コント時は user_id の先頭に "conte_" を付与する（漫才時はそのまま）
 function resolveScopedUserId(rawUserId, mode) {
   const id = String(rawUserId || "").trim();
   if (!id) return "";
@@ -147,7 +144,6 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
     const isIosUnlimitedPlan = plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited";
     const quota = resolveQuotaByPlan(plan_type);
 
-    // 1. iOS買い切り済み or 無制限フラグ値の場合は paid_credits を減らさない
     if ((isIosUnlimitedPlan && paid > 0) || paid >= UNLIMITED_FLAG_VALUE) {
       await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
@@ -160,7 +156,6 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
       };
     }
 
-    // 2. 無料枠内の消費
     if (used < quota) {
       await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
@@ -173,7 +168,6 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
       };
     }
 
-    // 3. 有料クレジット消費（-1）
     if (paid > 0) {
       const nextPaid = paid - 1;
       await setUsageRow(scoped_user_id, {
@@ -297,7 +291,6 @@ const CONTE_GENERAL_DEFS = {
 };
 
 const ALIAS_MAP = {
-  // 漫才用エイリアス
   "言い間違い／聞き間違い": "IIMACHIGAI",
   "比喩ボケ": "HIYU",
   "逆説ボケ": "GYAKUSETSU",
@@ -323,7 +316,6 @@ const ALIAS_MAP = {
   "surechigai": "SURECHIGAI",
   "tachibaGyakuten": "TACHIBA_GYAKUTEN",
 
-  // コント用エイリアス
   "キャラ憑依ボケ": "CHARA_HYOI",
   "状況ズレボケ": "JOKYO_ZURE",
   "小道具・マイムボケ": "KODOGU_MIME",
@@ -359,6 +351,43 @@ function resolveTechKey(item, table) {
 /* =========================
  * 文字数・整形ユーティリティ
  * ========================= */
+
+// 舞台設定メタ行（STAGE / LEFT_COSTUME / RIGHT_COSTUME）を抽出して本文から除去
+function extractStageMetaAndClean(rawText) {
+  let stageStyle = "";
+  let leftCostume = "";
+  let rightCostume = "";
+
+  const lines = String(rawText || "").replace(/\r\n/g, "\n").split("\n");
+  const remaining = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const mStage = trimmed.match(/^(?:\[)?STAGE\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+    if (mStage) {
+      stageStyle = mStage[1].toUpperCase();
+      continue;
+    }
+    const mLeft = trimmed.match(/^(?:\[)?LEFT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+    if (mLeft) {
+      leftCostume = mLeft[1].toUpperCase();
+      continue;
+    }
+    const mRight = trimmed.match(/^(?:\[)?RIGHT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+    if (mRight) {
+      rightCostume = mRight[1].toUpperCase();
+      continue;
+    }
+    remaining.push(line);
+  }
+
+  return {
+    cleanedRaw: remaining.join("\n").trim(),
+    stageStyle,
+    leftCostume,
+    rightCostume
+  };
+}
 
 function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   if (!text) return "";
@@ -637,7 +666,6 @@ function buildPromptByMode({
   ];
   const structureMeta = [...selectedLabels.general];
 
-  // iPhone版コントメーカーが付与した補助文「（※漫才ではなく〜）」があれば綺麗に除去して題材名を取り出す
   const cleanedTheme = String(theme || "")
     .replace(/（※漫才ではなく[\s\S]*?）/g, "")
     .trim();
@@ -661,14 +689,14 @@ function buildPromptByMode({
     ? techniquesForMeta.join("、")
     : "指定なし";
 
-  // ★ コント専用プロンプト
+  // ★ コント専用プロンプト（舞台設備・衣装コード出力＋ステージを大きく動くタグ指定）
   if (isConte) {
     const systemPrompt = [
       "あなたはキングオブコントの優勝ネタを数多く手掛けるプロのコント作家です。",
       "舞台でそのまま演じられる、日本語のコント（寸劇）台本を作成してください。",
-      "説明やト書きではなく、完成したセリフの掛け合いだけを出力してください。",
+      "説明やト書きではなく、指定された舞台メタ情報とタイトル、完成したセリフの掛け合いだけを出力してください。",
       "最初は日常的なシチュエーションから始まり、徐々にキャラクターの狂気やズレがエスカレートし、最後は鮮やかなオチで暗転する構成にしてください。",
-      "アプリのステージ演出（全身アクション・効果音）と連携するため、指定された演出タグを各セリフの先頭に必ず付けてください。"
+      "棒人間キャラクターがステージの左右・奥・手前をダイナミックに動き回って演じるため、移動やアクションを表す演出タグを積極的に使い分けてください。"
     ].join("\n");
 
     const prompt = [
@@ -685,29 +713,39 @@ function buildPromptByMode({
       "",
       guideline ? "【技法ガイドライン】\n" + guideline : "",
       "",
-      "【アプリ上演用の演出タグルール（重要）】",
-      "アプリ内でキャラクターが全身アクション・表情・効果音をつけるため、各セリフのコロン（:）の直後に、文脈に合った以下の演出タグを1つ付けてください。",
-      "- [通常] ：普通の会話や状況説明のセリフ（例: `A: [通常] すみません、これ温めてもらえますか？`）",
-      "- [ボケ] ：おどけたボケ、ズレた発言、奇妙な言動（例: `A: [ボケ] 僕、昨日から光合成だけで生きてるんですよ♪`）",
-      "- [演技] ：役柄になりきった芝居がかったセリフ、小道具を使うセリフ（例: `A: [演技] 「これよりオペを開始する！」…よし、メス！`）",
-      "- [キメ] ：ドヤ顔でカッコつける、謎のキメポーズをとるセリフ（例: `A: [キメ] フッ…何を隠そう、俺は伝説のコンビニ店員だ。`）",
-      "- [疑問] ：首をかしげる疑問や戸惑いの問いかけ（例: `B: [疑問] えっ、それどういう意味ですか？`）",
-      "- [呆れ] ：呆れたツッコミ、小声やため息混じりの冷静な指摘（例: `B: [呆れ] いや…あなたさっきから何言ってるんですか…。`）",
-      "- [ツッコミ] ：通常の勢いあるツッコミ・指摘（例: `B: [ツッコミ] いや逆でしょ！何やってんの！`）",
-      "- [叩く] ：コント後半のクライマックスに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選！）",
-      "- [ズッコケ] ：相手のあんまりなボケに拍子抜けして新喜劇風にズッコケるリアクション（例: `B: [ズッコケ] 知らんのかい！ズコーッ！`）",
-      "- [詰め寄る] ：相手の目の前までグッと顔を近づけて迫る・凄むセリフ（例: `B: [詰め寄る] おい、本当のことを白状しろよ…。`）",
-      "- [パニック] ：恐怖や混乱で顔面蒼白になりガタガタ震えるセリフ（例: `B: [パニック] ひぃぃぃ！ヤバいってこれ！助けてくれー！`）",
-      "- [土下座] ：床に頭を擦り付けて必死に謝罪・懇願するセリフ（例: `A: [土下座] すいませんでしたー！どうか命だけはー！`）",
+      "【舞台セットと衣装の指定（最優先・必須）】",
+      "アプリのステージ背景と2人の衣装を設定に完全一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
+      "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING から最も合うものを1つ)",
+      `LEFT_COSTUME: (${bokeName}の衣装を CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN から1つ)`,
+      `RIGHT_COSTUME: (${tsukkomiName}の衣装を上記リストから1つ)`,
       "",
-      "【コントの出力ルール（厳守）】",
-      "- 漫才ではないため、冒頭の「どうもー！」や、最後の「もういいよ！」「もうええわ！」「ありがとうございました」は絶対に入れないでください。",
-      "- 照明が明転した瞬間から、すでにそのシチュエーションの役に入り込んだ第一声で始めてください。",
-      "- タイトルを最初に1つだけ出す（【】や「タイトル:」は付けずタイトル文字列のみ）。",
-      "- タイトルと本文の間には空行を1つ入れる。",
-      `- 本文は必ず「${bokeName}: [タグ] セリフ」「${tsukkomiName}: [タグ] セリフ」の形式にする。`,
-      "- 各台詞の間には空行を1つ入れる。",
-      "- 解説やト書きは一切出力せず、最後はコントらしい鮮やかで面白いオチのセリフ（暗転のキッカケになる一言）でピタッと終える。"
+      "【アプリ上演用の演出・ステージ移動タグルール（重要）】",
+      "コントらしく舞台の左右・上下（奥・手前）を広く使って動き回るため、各セリフのコロン（:）の直後に、文脈に合った以下のタグを1つ付けてください。",
+      "- [登場] ：舞台の端から歩いて登場する・駆け寄る（冒頭や場面転換時）",
+      "- [通常] ：通常の会話",
+      "- [作業] ：その場のカウンターや机・設備で作業や身振りをする",
+      "- [歩き回る] ：ステージ上をウロウロ歩き回りながら話す・落ち着きなく動く",
+      "- [ボケ] ：前に出ておどけたボケ、ズレた発言、奇妙な言動をする",
+      "- [演技] ：ステージを大きく使って役柄になりきった芝居・マイムをする",
+      "- [キメ] ：ステージ手前に出てドヤ顔でカッコつける・キメポーズをとる",
+      "- [詰め寄る] ：相手の目の前までグッと歩いて迫る・圧をかける",
+      "- [逃げる] ：驚いたり怖がったりしてステージの端や奥へ後ずさりして離れる",
+      "- [隠れる] ：物陰やステージ奥へ身を潜める・様子をうかがう",
+      "- [疑問] ：首をかしげる疑問や戸惑いの問いかけ",
+      "- [呆れ] ：呆れたツッコミ、一歩引いて冷静に指摘する",
+      "- [ツッコミ] ：相手に歩み寄って勢いよくツッコむ・指摘する",
+      "- [叩く] ：コント後半のクライマックスに入れる「渾身の強ツッコミ」（※台本全体で1〜2回に厳選）",
+      "- [ズッコケ] ：相手のボケに拍子抜けして床に派手にひっくり返る",
+      "- [パニック] ：恐怖や混乱でステージ上を右往左往してガタガタ震える",
+      "- [土下座] ：床に頭を擦り付けて必死に謝罪・懇願する",
+      "",
+      "【コントの出力フォーマット（厳守）】",
+      "1〜3行目：STAGE / LEFT_COSTUME / RIGHT_COSTUME の指定",
+      "4行目：タイトル文字列のみ（【】や「タイトル:」は付けない）",
+      "5行目：空行",
+      `6行目以降：「${bokeName}: [タグ] セリフ」「${tsukkomiName}: [タグ] セリフ」の掛け合い（各セリフの間に空行を1つ入れる）`,
+      "- 漫才ではないため、冒頭の「どうもー！」や最後の「もういいよ！」「ありがとうございました」は絶対に入れないでください。",
+      "- 最後はコントらしい鮮やかで面白いオチのセリフ（暗転のキッカケになる一言）でピタッと終える。"
     ].join("\n");
 
     return {
@@ -904,12 +942,11 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const action = body.action || "generate";
 
-    // ★ 漫才("manzai") か コント("conte") かを判定し、コントなら user_id を "conte_..." に分離する
     const mode = detectAppMode(body);
     const rawUserId = String(body.user_id || "").trim();
     const scopedUserId = resolveScopedUserId(rawUserId, mode);
 
-    // 1. 購入クレジット追加 / 買い切りアンロック（漫才・コントそれぞれの枠に加算）
+    // 1. 購入クレジット追加 / 買い切りアンロック
     if (action === "add_credits" || action === "add_credit") {
       const product_id = String(body.product_id || "").trim();
 
@@ -932,7 +969,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. クレジット残高照会（action: "get_credit" が投げられた場合にも対応）
+    // 2. クレジット残高照会
     if (action === "get_credit" || action === "get_credits") {
       const row = await getUsageRow(scopedUserId);
       return res.status(200).json({
@@ -945,7 +982,63 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3. 通常生成（漫才 または コント）
+    // ★ 3. AIによる「おまかせ設定（コント設定ガチャ）」自動生成（クレジット消費なし）
+    if (action === "random_preset" || action === "generate_preset") {
+      const categories = [
+        "コンビニ・スーパー・接客",
+        "警察の取調室・探偵・裁判",
+        "病院の診察室・手術室・薬局",
+        "学校の教室・職員室・部活",
+        "高級レストラン・カフェ・寿司屋",
+        "会社の採用面接・社長室・会議",
+        "銀行強盗・怪盗・立てこもり",
+        "ファンタジー（魔王城・勇者・時代劇）",
+        "タクシー車内・電車・飛行機",
+        "美容室・カリスマ美容師",
+        "スポーツジム・ボクシング・格闘技",
+        "テレビ番組スタジオ・通販番組・インタビュー",
+        "駅のホーム・改札・待ち合わせ",
+        "実家のお茶の間・家族会議"
+      ];
+      const pickCat = categories[Math.floor(Math.random() * categories.length)];
+
+      const presetPrompt = [
+        "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
+        `「${pickCat}」に関連する、思わず見たくなる最高に面白くてユニークな2人コントの設定を1つ考案してください。`,
+        "毎回違う斬新な切り口にし、以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
+        '{ "theme": "具体的な舞台・シチュエーション（18文字以内）", "genre": "作風・ジャンル（12文字以内）", "characters": "ボケ役の具体的な役名（12文字以内）, ツッコミ役の具体的な役名（12文字以内）" }'
+      ].join("\n");
+
+      const aiResp = await client.chat.completions.create({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
+          { role: "user", content: presetPrompt }
+        ]
+      });
+
+      const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
+        .replace(/```(?:json)?/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+      let parsed = null;
+      try {
+        const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+      } catch (_e) {
+        parsed = null;
+      }
+
+      return res.status(200).json({
+        ok: true,
+        theme: String(parsed?.theme || "深夜のコンビニ").trim(),
+        genre: String(parsed?.genre || "日常×シュール").trim(),
+        characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
+      });
+    }
+
+    // 4. 通常生成（漫才 または コント）
     if (action !== "generate") {
       return res.status(400).json({ error: "Unknown action" });
     }
@@ -975,7 +1068,6 @@ export default async function handler(req, res) {
           : []
     };
 
-    // クレジット確認（漫才用・コント用で独立した scopedUserId でチェック）
     const credit = await checkCredit(scopedUserId, plan_type);
     if (!credit.ok) {
       return res.status(402).json({
@@ -987,7 +1079,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // モード別プロンプト作成
     const {
       systemPrompt,
       prompt,
@@ -997,10 +1088,11 @@ export default async function handler(req, res) {
       maxLen,
       tsukkomiName,
       targetLen,
-      safeTheme
+      safeTheme,
+      safeGenre,
+      charDesc
     } = buildPromptByMode({ mode, theme, genre, characters, length, selected });
 
-    // OpenAI 呼び出し
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
@@ -1021,25 +1113,34 @@ export default async function handler(req, res) {
       .replace(/\s*```$/i, "")
       .trim();
 
-    // タイトルと本文を分離
-    let { title, body: generatedBody } = splitTitleAndBody(raw);
+    // 舞台・衣装メタ行を抽出して本文から切り離す
+    const { cleanedRaw, stageStyle, leftCostume, rightCostume } = extractStageMetaAndClean(raw);
+
+    let { title, body: generatedBody } = splitTitleAndBody(cleanedRaw);
     const normalized = ensureSingleTitle(title, generatedBody);
 
     title = normalized.title && normalized.title !== "無題" ? normalized.title : safeTheme;
     let bodyText = normalized.body;
 
-    // 整形
     bodyText = normalizeSpeakerColons(bodyText);
     bodyText = ensureBlankLineBetweenTurns(bodyText);
     bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
 
-    // ★ 漫才モードの時だけ末尾に「もういいよ！」を保証し、コントモードの時はオチのセリフでピタッと終える！
     if (mode === "manzai") {
       bodyText = ensureManzaiTsukkomiOutro(bodyText, tsukkomiName);
     }
 
-    // クレジット消費（漫才・コントそれぞれの枠で消費）
     const consumption = await consumeAfterSuccess(scopedUserId, plan_type);
+
+    // アプリ側が舞台設備と衣装を100%特定できる複合セッティング文字列
+    const fullSettingInfo = [
+      safeTheme,
+      safeGenre,
+      charDesc,
+      stageStyle ? `STAGE:${stageStyle}` : "",
+      leftCostume ? `LEFT_COSTUME:${leftCostume}` : "",
+      rightCostume ? `RIGHT_COSTUME:${rightCostume}` : ""
+    ].filter(Boolean).join(" | ");
 
     return res.status(200).json({
       ok: true,
@@ -1048,10 +1149,15 @@ export default async function handler(req, res) {
       body: bodyText,
       text: bodyText,
       script: bodyText,
+      setting: fullSettingInfo,
       techniques: techniquesForMeta,
       structure: structureMeta,
       meta: {
         mode,
+        setting: fullSettingInfo,
+        stage_style: stageStyle,
+        left_costume: leftCostume,
+        right_costume: rightCostume,
         structure: structureMeta,
         techniques: techniquesForMeta,
         usage_count: consumption.output_count ?? 0,
