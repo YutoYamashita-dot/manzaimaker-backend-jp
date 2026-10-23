@@ -688,7 +688,7 @@ function buildPromptByMode({
     ? techniquesForMeta.join("、")
     : "指定なし";
 
-  // ★ コント専用プロンプト（パンダ・ゴリラ・クマ完全分離＆人間の衣装ズレ防止ルール徹底）
+  // ★ コント専用プロンプト
   if (isConte) {
     const systemPrompt = [
       "あなたはキングオブコントの優勝ネタを数多く手掛ける天才コント作家です。",
@@ -987,59 +987,115 @@ export default async function handler(req, res) {
       });
     }
 
-    // ★ 3. AIによる「おまかせ設定」（基本は普通の人間同士が繰り広げる面白いコント設定を生成！）
-    if (action === "random_preset" || action === "generate_preset") {
-      const categories = [
-        "コンビニ・スーパー・ドラッグストアの接客で起きる面白おかしい人間ドラマコント",
-        "警察の取調室・探偵事務所・職務質問でクセの強い犯人と刑事の掛け合いコント",
-        "病院の診察室・手術室・歯医者で医者と患者のズレたやり取りコント",
-        "学校の教室・職員室・進路相談で先生と生徒のシュールな学園コント",
-        "高級レストラン・カフェ・寿司屋でウェイターや大将と客のすれ違いコント",
-        "会社の最終面接・社長室・謝罪会見で立場が逆転していくオフィスコント",
-        "銀行強盗・立てこもり現場で緊張と緩和が起きるコメディコント",
-        "魔王城・勇者パーティー・時代劇で現代的な悩みを語り出すファンタジーコント",
-        "タクシー車内・教習所・エレベーターの密室でクセの強い運転手と客のコント",
-        "表参道の美容室・パーソナルジム・通販番組スタジオでキャラが暴走するコント",
-        "終電の駅のホーム・実家のお茶の間でまさかの秘密が発覚する日常コント"
-      ];
-      const pickCat = categories[Math.floor(Math.random() * categories.length)];
+    // ★ 3. AIによる「おまかせ設定」（漫才モードとコントモードの両方に完全対応！クレジット消費なし）
+    if (
+      action === "suggest_setting" ||
+      action === "random_preset" ||
+      action === "generate_preset"
+    ) {
+      if (mode === "conte") {
+        // 【コントメーカー用】のおもしろ設定生成
+        const conteCategories = [
+          "コンビニ・スーパー・ドラッグストアの接客で起きる面白おかしい人間ドラマコント",
+          "警察の取調室・探偵事務所・職務質問でクセの強い犯人と刑事の掛け合いコント",
+          "病院の診察室・手術室・歯医者で医者と患者のズレたやり取りコント",
+          "学校の教室・職員室・進路相談で先生と生徒のシュールな学園コント",
+          "高級レストラン・カフェ・寿司屋でウェイターや大将と客のすれ違いコント",
+          "会社の最終面接・社長室・謝罪会見で立場が逆転していくオフィスコント",
+          "銀行強盗・立てこもり現場で緊張と緩和が起きるコメディコント",
+          "魔王城・勇者パーティー・時代劇で現代的な悩みを語り出すファンタジーコント",
+          "タクシー車内・教習所・エレベーターの密室でクセの強い運転手と客のコント",
+          "表参道の美容室・パーソナルジム・通販番組スタジオでキャラが暴走するコント",
+          "終電の駅のホーム・実家のお茶の間でまさかの秘密が発覚する日常コント"
+        ];
+        const pickCat = conteCategories[Math.floor(Math.random() * conteCategories.length)];
 
-      const presetPrompt = [
-        "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
-        `テーマ：「${pickCat}」`,
-        "設定を見ただけで思わず見たくなるような、最高に面白くてユニークな『人間の登場人物2人』によるコント設定を1つ考案してください。",
-        "登場人物には具体的な職業や立場がわかる人間の役名（例：クセが強すぎる新人店員, 普通に買い物したい客／例え話が不吉な医者, 不安になる患者 など）を設定してください。",
-        "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
-        '{ "theme": "具体的で面白い舞台・状況（20文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な人間役名（14文字以内）, ツッコミ役の具体的な人間役名（14文字以内）" }'
-      ].join("\n");
+        const contePresetPrompt = [
+          "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
+          `テーマ：「${pickCat}」`,
+          "設定を見ただけで思わず見たくなるような、最高に面白くてユニークな『人間の登場人物2人』によるコント設定を1つ考案してください。",
+          "登場人物には具体的な職業や立場がわかる人間の役名（例：クセが強すぎる新人店員, 普通に買い物したい客／例え話が不吉な医者, 不安になる患者 など）を設定してください。",
+          "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
+          '{ "theme": "具体的で面白い舞台・状況（20文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な人間役名（14文字以内）, ツッコミ役の具体的な人間役名（14文字以内）" }'
+        ].join("\n");
 
-      const aiResp = await client.chat.completions.create({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
-          { role: "user", content: presetPrompt }
-        ]
-      });
+        const aiResp = await client.chat.completions.create({
+          model: OPENAI_MODEL,
+          messages: [
+            { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
+            { role: "user", content: contePresetPrompt }
+          ]
+        });
 
-      const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
-        .replace(/```(?:json)?/gi, "")
-        .replace(/```/g, "")
-        .trim();
+        const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
+          .replace(/```(?:json)?/gi, "")
+          .replace(/```/g, "")
+          .trim();
 
-      let parsed = null;
-      try {
-        const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
-        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
-      } catch (_e) {
-        parsed = null;
+        let parsed = null;
+        try {
+          const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
+          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+        } catch (_e) {
+          parsed = null;
+        }
+
+        return res.status(200).json({
+          ok: true,
+          mode: "conte",
+          theme: String(parsed?.theme || "深夜のコンビニ").trim(),
+          genre: String(parsed?.genre || "日常×シュール").trim(),
+          characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
+        });
+      } else {
+        // ★【漫才メーカー用】のおもしろ設定生成
+        const manzaiCategories = [
+          "日常のあるある（回転寿司・コンビニ・美容院・電車など）に奇抜な妄想や屁理屈が混ざるしゃべくり漫才",
+          "理想のデート・プロポーズ・ヒーローインタビューなどを練習しようとして設定が崩壊するコント漫才",
+          "昔話（桃太郎・浦島太郎）や歴史・映画のコンプライアンスや矛盾にイチャモンをつける風刺・考察漫才",
+          "無人島に持っていくもの・タイムマシン・10億円当たったら等の定番テーマが斜め上に暴走する論理破綻漫才",
+          "AI・最新テクノロジー・将来の夢・新しいビジネスなどを熱弁するボケと現実的なツッコミの掛け合い漫才",
+          "小学校の運動会・修学旅行・部活の謎ルールを大人目線で振り返るハイテンポ漫才"
+        ];
+        const pickManzaiCat = manzaiCategories[Math.floor(Math.random() * manzaiCategories.length)];
+
+        const manzaiPresetPrompt = [
+          "あなたはM-1グランプリの優勝ネタを手掛けるプロの漫才作家です。",
+          `方向性：「${pickManzaiCat}」`,
+          "設定を見ただけで思わず漫才を聴きたくなるような、最高に面白くてユニークな漫才の「テーマ（theme）」「ジャンル・切り口（genre）」「ボケとツッコミ2人のキャラクター設定（characters）」を1組考案してください。",
+          "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
+          '{ "theme": "具体的で面白い漫才のテーマ（20文字以内）", "genre": "漫才の作風・切り口（14文字以内）", "characters": "ボケの個性的なキャラ設定（16文字以内）, ツッコミのキャラ設定（16文字以内）" }'
+        ].join("\n");
+
+        const aiResp = await client.chat.completions.create({
+          model: OPENAI_MODEL,
+          messages: [
+            { role: "system", content: "JSONのみを出力するプロの漫才設定クリエイター" },
+            { role: "user", content: manzaiPresetPrompt }
+          ]
+        });
+
+        const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
+          .replace(/```(?:json)?/gi, "")
+          .replace(/```/g, "")
+          .trim();
+
+        let parsed = null;
+        try {
+          const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
+          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+        } catch (_e) {
+          parsed = null;
+        }
+
+        return res.status(200).json({
+          ok: true,
+          mode: "manzai",
+          theme: String(parsed?.theme || "無人島に1つだけ持っていくもの").trim(),
+          genre: String(parsed?.genre || "しゃべくり漫才").trim(),
+          characters: String(parsed?.characters || "屁理屈で変な日用品を推すボケ, 論破したいツッコミ").trim()
+        });
       }
-
-      return res.status(200).json({
-        ok: true,
-        theme: String(parsed?.theme || "深夜のコンビニ").trim(),
-        genre: String(parsed?.genre || "日常×シュール").trim(),
-        characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
-      });
     }
 
     // 4. 通常生成（漫才 または コント）
