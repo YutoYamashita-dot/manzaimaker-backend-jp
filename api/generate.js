@@ -688,20 +688,20 @@ function buildPromptByMode({
     ? techniquesForMeta.join("、")
     : "指定なし";
 
-  // ★ コント専用プロンプト（人間・動物・物の配役コード対応＋シュール＆面白さ強化）
+  // ★ コント専用プロンプト（パンダ・ゴリラ・クマ完全分離＆人間の衣装ズレ防止ルール徹底）
   if (isConte) {
     const systemPrompt = [
       "あなたはキングオブコントの優勝ネタを数多く手掛ける天才コント作家です。",
       "舞台でそのまま演じられる、最高に面白おかしくて笑える日本語のコント（寸劇）台本を作成してください。",
       "説明やト書きではなく、指定された舞台メタ情報とタイトル、完成したセリフの掛け合いだけを出力してください。",
-      "登場人物に『動物（犬・猫・パンダ・タコ・ペンギン・宇宙人など）』や『物（冷蔵庫・スマホ・おにぎり・りんご・信号機・聖剣・トイレ・ロボットなど）』が含まれている場合は、その動物の習性や、無機物ならではの機能・視点（冷やす、充電が減る、食べられる恐怖、扉を開け閉めされる等）をフル活用したシュールで抱腹絶倒のボケとツッコミを展開してください。",
+      "登場人物に『動物』や『物』が指定されている場合は、その動物の習性や無機物ならではの機能・視点をフル活用したシュールで爆笑できるボケとツッコミを展開してください。",
       "2人は基本的には定位置で立ち止まって会話し、詰め寄る・逃げる・隠れる・作業するなど『動きに明確な意味がある場面』でのみ移動タグを使ってください。"
     ].join("\n");
 
     const costumeCodesList = [
-      "【人間の衣装】CLERK_APRON / SHOPPER_BAG / POLICE_DETECTIVE / SUSPECT_GLASSES / DOCTOR_COAT / PATIENT_BANDAGE / TEACHER_POINTER / STUDENT_CAP / WAITER_TRAY / CAFE_GUEST_MENU / BOSS_RED_TIE / APPLICANT_BLUE_TIE / ROBBER_MASK / HERO_SWORD / DEMON_MAGE_STAFF / DRIVER_CAP / CHEF_HAT / BARBER_SCISSORS / ATHLETE_HEADBAND / MC_MIC / STATION_STAFF / CASUAL_PLAIN",
-      "【動物の姿】ANIMAL_DOG (犬・狼) / ANIMAL_CAT (猫・虎・ライオン) / ANIMAL_BEAR_PANDA (クマ・パンダ・ゴリラ・猿) / ANIMAL_RABBIT (ウサギ) / ANIMAL_BIRD_PENGUIN (鳥・ペンギン・ニワトリ) / ANIMAL_OCTOPUS (タコ・イカ・海洋生物) / ANIMAL_ALIEN (宇宙人・地球外生命体)",
-      "【物の姿】OBJECT_FRIDGE (冷蔵庫・テレビ・電子レンジ等の四角い家電) / OBJECT_SMARTPHONE (スマホ・パソコン・時計) / OBJECT_APPLE (りんご・トマト・みかん等の丸い食べ物) / OBJECT_ONIGIRI (おにぎり・寿司・パン等の食べ物) / OBJECT_TRAFFIC_LIGHT (信号機・標識) / OBJECT_SWORD (剣・文房具・傘・ハサミ等の細長い道具) / OBJECT_TOILET (トイレ・便器・日用品) / OBJECT_ROBOT (AIロボット・掃除機ロボ・メカ)"
+      "【人間の衣装（人間役の場合は必ずここから選ぶこと）】CLERK_APRON (店員・バイト) / SHOPPER_BAG (買い物客) / POLICE_DETECTIVE (刑事・警察) / SUSPECT_GLASSES (容疑者) / DOCTOR_COAT (医者・執刀医) / PATIENT_BANDAGE (患者) / TEACHER_POINTER (先生・教師) / STUDENT_CAP (生徒・学生) / WAITER_TRAY (ウェイター) / CAFE_GUEST_MENU (レストランの客) / BOSS_RED_TIE (面接官・社長・上司・窓口係) / APPLICANT_BLUE_TIE (応募者・会社員・部下) / ROBBER_MASK (強盗・犯人) / HERO_SWORD (勇者・騎士) / DEMON_MAGE_STAFF (魔王・魔法使い) / DRIVER_CAP (運転手) / CHEF_HAT (シェフ・大将) / BARBER_SCISSORS (美容師) / ATHLETE_HEADBAND (トレーナー・格闘家) / MC_MIC (司会・販売員) / STATION_STAFF (駅員・警備員) / CASUAL_PLAIN (一般人・私服・該当なし)",
+      "【動物の姿（役名が動物の場合のみ選択）】ANIMAL_DOG (犬・柴犬・狼) / ANIMAL_CAT (猫・虎・ライオン) / ANIMAL_PANDA (パンダ) / ANIMAL_GORILLA (ゴリラ・猿・チンパンジー) / ANIMAL_BEAR (クマ・ヒグマ) / ANIMAL_RABBIT (ウサギ) / ANIMAL_BIRD_PENGUIN (ペンギン・鳥) / ANIMAL_OCTOPUS (タコ・イカ) / ANIMAL_ALIEN (宇宙人)",
+      "【物の姿（役名が物の場合のみ選択）】OBJECT_FRIDGE (冷蔵庫・家電) / OBJECT_SMARTPHONE (スマホ・PC) / OBJECT_APPLE (りんご・果物) / OBJECT_ONIGIRI (おにぎり・寿司・食パン) / OBJECT_TRAFFIC_LIGHT (信号機) / OBJECT_SWORD (聖剣・メス・文房具) / OBJECT_TOILET (トイレ・便器) / OBJECT_ROBOT (AIロボット・メカ)"
     ].join("\n");
 
     const prompt = [
@@ -720,6 +720,7 @@ function buildPromptByMode({
       "",
       "【舞台セットと演者の姿・衣装の指定（最優先・必須）】",
       "アプリのステージ背景と2人の姿（人間・動物・物）を完全一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
+      "※重要：人間の役柄なのに ANIMAL_ や OBJECT_ を選ぶことは絶対に禁止です。またパンダは ANIMAL_PANDA、ゴリラは ANIMAL_GORILLA、クマは ANIMAL_BEAR を正確に選んでください。",
       "STAGE: (SHOP_COUNTER / INTERROGATION / HOSPITAL / CLASSROOM / CAFE_TABLE / OFFICE_DESK / BANK_ROBBERY / FANTASY_HERO / TAXI_CAR / HAIR_SALON / GYM_RING / TV_STUDIO / TRAIN_STATION / HOME_LIVING / NONE から1つ。合わない場合は NONE)",
       `LEFT_COSTUME: (${bokeName}の衣装または動物・物の姿を下記コードから1つ選択)`,
       `RIGHT_COSTUME: (${tsukkomiName}の衣装または動物・物の姿を下記コードから1つ選択)`,
@@ -986,29 +987,36 @@ export default async function handler(req, res) {
       });
     }
 
-    // ★ 3. AIによる「おまかせ設定（カオス設定＆動物・物の珍配役ガチャ）」自動生成
+    // ★ 3. AIによる「おまかせ設定」（基本は普通の人間同士が繰り広げる面白いコント設定を生成！）
     if (action === "random_preset" || action === "generate_preset") {
       const categories = [
-        "【擬人化・物×人間】コンビニの廃棄寸前のおにぎりや冷蔵庫・スマホ・信号機・手術室のメスなどが急に喋り出して人間に文句を言うコント",
-        "【動物×人間】警察の取調室や会社の採用面接・タクシー・美容室なのに、片方がどう見ても『喋る犬・猫・ゴリラ・タコ・パンダ・ペンギン』なコント",
-        "【物×物・動物×物】真夜中のキッチンで『毒舌な冷蔵庫と飼い猫』や『意識高い系のりんごと賞味期限切れのおにぎり』『充電2%のスマホとAIロボット』が言い争うコント",
-        "【カオス立場逆転】銀行強盗・魔王城・病院の手術室・高級フレンチなどで、絶対にありえない異常事態や立場の逆転が起きる爆笑コント"
+        "コンビニ・スーパー・ドラッグストアの接客で起きる面白おかしい人間ドラマコント",
+        "警察の取調室・探偵事務所・職務質問でクセの強い犯人と刑事の掛け合いコント",
+        "病院の診察室・手術室・歯医者で医者と患者のズレたやり取りコント",
+        "学校の教室・職員室・進路相談で先生と生徒のシュールな学園コント",
+        "高級レストラン・カフェ・寿司屋でウェイターや大将と客のすれ違いコント",
+        "会社の最終面接・社長室・謝罪会見で立場が逆転していくオフィスコント",
+        "銀行強盗・立てこもり現場で緊張と緩和が起きるコメディコント",
+        "魔王城・勇者パーティー・時代劇で現代的な悩みを語り出すファンタジーコント",
+        "タクシー車内・教習所・エレベーターの密室でクセの強い運転手と客のコント",
+        "表参道の美容室・パーソナルジム・通販番組スタジオでキャラが暴走するコント",
+        "終電の駅のホーム・実家のお茶の間でまさかの秘密が発覚する日常コント"
       ];
       const pickCat = categories[Math.floor(Math.random() * categories.length)];
 
       const presetPrompt = [
-        "あなたはキングオブコントの優勝ネタを手掛ける日本一のコント作家です。",
-        `テーマ方向性：「${pickCat}」`,
-        "設定を見ただけで思わず吹き出してしまうような、最高に面白おかしくてシュールな2人コントの設定を1つ考案してください。",
-        "登場人物には人間だけでなく『動物（犬・猫・パンダ・ゴリラ・タコ・ペンギン・宇宙人など）』や『物（冷蔵庫・スマホ・りんご・おにぎり・信号機・聖剣・トイレ・ロボットなど）』を積極的に配役に任命してください。",
+        "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
+        `テーマ：「${pickCat}」`,
+        "設定を見ただけで思わず見たくなるような、最高に面白くてユニークな『人間の登場人物2人』によるコント設定を1つ考案してください。",
+        "登場人物には具体的な職業や立場がわかる人間の役名（例：クセが強すぎる新人店員, 普通に買い物したい客／例え話が不吉な医者, 不安になる患者 など）を設定してください。",
         "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
-        '{ "theme": "具体的で面白い舞台・異常な状況（22文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な役名（15文字以内）, ツッコミ役の具体的な役名（15文字以内）" }'
+        '{ "theme": "具体的で面白い舞台・状況（20文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な人間役名（14文字以内）, ツッコミ役の具体的な人間役名（14文字以内）" }'
       ].join("\n");
 
       const aiResp = await client.chat.completions.create({
         model: OPENAI_MODEL,
         messages: [
-          { role: "system", content: "JSONのみを出力する天才コント設定クリエイター" },
+          { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
           { role: "user", content: presetPrompt }
         ]
       });
@@ -1028,9 +1036,9 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         ok: true,
-        theme: String(parsed?.theme || "深夜のコンビニ・廃棄寸前の棚").trim(),
-        genre: String(parsed?.genre || "擬人化×シュール").trim(),
-        characters: String(parsed?.characters || "プライドが高すぎる高級おにぎり, 値引きシールを貼る店員").trim()
+        theme: String(parsed?.theme || "深夜のコンビニ").trim(),
+        genre: String(parsed?.genre || "日常×シュール").trim(),
+        characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
       });
     }
 
