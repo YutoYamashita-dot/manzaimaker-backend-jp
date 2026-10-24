@@ -453,6 +453,82 @@ function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
   return t ? `${t}\n\n${outro}` : outro;
 }
 
+// 役名のゆれを照合し、判定できた台詞をユーザーが指定した正式な左/右の配役名へ統一する。
+// これにより iOS の口パク・声色・動物Spriteの左右が同じ話者名を使える。
+// 本文（台詞そのもの）は変えない。曖昧な台詞を別の役に強制的に付け替えない。
+function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
+  if (!leftRole || !rightRole || leftRole === "A" && rightRole === "B") return text;
+  const normalize = (s) => String(s || "")
+    .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/[\s　「」『』]/g, "")
+    .replace(/スマートフォン/g, "スマホ")
+    .replace(/ネコ/g, "猫").replace(/イヌ/g, "犬").replace(/うさぎ/g, "ウサギ");
+  const cast = [normalize(leftRole), normalize(rightRole)];
+  const normalizeSideHint = (original) => {
+    const s = String(original || "").trim();
+    if (/^(?:左(?:側|役)?|ボケ|A|①|1)(?:[（(].*?[）)])?$/.test(s)) return 0;
+    if (/^(?:右(?:側|役)?|ツッコミ|B|②|2)(?:[（(].*?[）)])?$/.test(s)) return 1;
+    return null;
+  };
+  const matchScore = (speaker, role) => {
+    if (!speaker || !role) return 0;
+    if (speaker === role) return 120;
+    const leftKind = inferRoleCostume(speaker);
+    const rightKind = inferRoleCostume(role);
+    if (leftKind.kind === "nonhuman") {
+      if (rightKind.kind === "human") return 0;
+      if (rightKind.kind === "nonhuman" && leftKind.costume !== rightKind.costume) return 0;
+    }
+    if (speaker.length >= 2 && role.endsWith(speaker)) return 105;
+    if (speaker.length >= 2 && role.startsWith(speaker)) return 90;
+    if (speaker.length >= 2 && role.includes(speaker)) return 65;
+    if (role.length >= 3 && speaker.includes(role)) return 60;
+    const aliases = { "犬":"柴犬", "ネコ":"猫", "お客さん":"客", "お客":"客", "店長":"店員", "飼育担当":"飼育員" };
+    if (aliases[speaker] && role.includes(aliases[speaker])) return 58;
+    return 0;
+  };
+  const lines = String(text).split("\n");
+  const labels = [];
+  for (const line of lines) {
+    const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
+    if (m && !/^\d+$/.test(m[2].trim())) {
+      const name = m[2].trim();
+      if (!labels.includes(name)) labels.push(name);
+    }
+  }
+  const assigned = new Map();
+  for (const label of labels) {
+    const hint = normalizeSideHint(label);
+    if (hint !== null) { assigned.set(label, hint); continue; }
+    const name = normalize(label);
+    const scores = cast.map((role) => matchScore(name, role));
+    if (scores[0] > scores[1] && scores[0] >= 58) assigned.set(label, 0);
+    else if (scores[1] > scores[0] && scores[1] >= 58) assigned.set(label, 1);
+  }
+  // 片側が確定し他に未知名が一つの場合に限り、残る役へ対応させる。
+  const unknown = labels.filter((label) => !assigned.has(label));
+  const used = new Set(assigned.values());
+  if (unknown.length === 1 && used.size === 1) {
+    const vacant = used.has(0) ? 1 : 0;
+    const spokenKind = inferRoleCostume(normalize(unknown[0]));
+    const vacantKind = inferRoleCostume(cast[vacant]);
+    // 「猫カフェの店員」をAIが「猫」と誤表記した際など、動物の種類が
+    // 一致しない台詞を反対側へ強制割り当てしない。
+    if (spokenKind.kind !== "nonhuman" ||
+        (vacantKind.kind === "nonhuman" && spokenKind.costume === vacantKind.costume)) {
+      assigned.set(unknown[0], vacant);
+    }
+  }
+
+  return lines.map((line) => {
+    const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
+    if (!m || !assigned.has(m[2].trim())) return line;
+    const roleName = assigned.get(m[2].trim()) === 0 ? leftRole : rightRole;
+    return `${m[1]}${roleName}: ${m[3].trimStart()}`;
+  }).join("\n");
+}
+
 function normalizeSpeakerColons(s) {
   return s.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, (_m, head, name) => `${head}${name}: `);
 }
@@ -586,25 +662,23 @@ function ensureSingleTitle(titleIn, bodyIn) {
  * ========================= */
 
 function parseCharacterNames(charDesc) {
-  // The request's order is authoritative: first = left, second = right.
-  // Read explicitly labeled pairs BEFORE splitting punctuation so "左: 猫 / 右: パンダ" stays aligned.
+  // 左右の配役はリクエストの順序で固定し、AIが名前や衣装を入れ替えても上書きしない。
   const source = String(charDesc || "").trim().replace(/\r\n?/g, "\n");
   const cleanName = (raw) => String(raw || "")
-    .replace(/^[\s]*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
-    .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
-    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/^\s*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
+    .replace(/^\s*(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
     .trim();
-  const labeled = source.match(/^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*[,、，／/・;；\n]+\s*右(?:側|役)?\s*[:：]\s*(.+)$/s);
-  const parts = labeled ? [labeled[1], labeled[2]] :
-    source.split(/[,、，／/・;；\n]+/).map((name) => name.trim()).filter(Boolean);
-  // Short informal entry often used for two animals, e.g. "パンダと猫".
-  if (!labeled && parts.length === 1) {
-    const pair = parts[0].match(/^(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ)と(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ)$/);
+  const labeled = source.match(/^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*(?:[,、，／/;；\n]|\s+・\s+|・)\s*右(?:側|役)?\s*[:：]\s*(.+?)\s*$/s);
+  if (labeled) return { bokeName: cleanName(labeled[1]) || "A", tsukkomiName: cleanName(labeled[2]) || "B" };
+
+  // 中点「・」は役名の一部にも使うため、原則として区切りに使わない。
+  let parts = source.split(/[,、，／/;；\n]+/).map(cleanName).filter(Boolean);
+  if (parts.length < 2) parts = source.split(/\s+・\s+/).map(cleanName).filter(Boolean);
+  if (parts.length < 2) {
+    const pair = source.match(/^(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ|冷蔵庫|スマホ|ロボット)[・と](パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ|冷蔵庫|スマホ|ロボット)$/);
     if (pair) return { bokeName: pair[1], tsukkomiName: pair[2] };
   }
-  if (parts.length >= 2) {
-    return { bokeName: cleanName(parts[0]) || "A", tsukkomiName: cleanName(parts[1]) || "B" };
-  }
+  if (parts.length >= 2) return { bokeName: parts[0], tsukkomiName: parts[1] };
   return { bokeName: "A", tsukkomiName: "B" };
 }
 
@@ -1222,6 +1296,9 @@ export default async function handler(req, res) {
     let bodyText = normalized.body;
 
     bodyText = normalizeSpeakerColons(bodyText);
+    if (mode === "conte") {
+      bodyText = canonicalizeConteSpeakerLabels(bodyText, bokeName, tsukkomiName);
+    }
     bodyText = ensureBlankLineBetweenTurns(bodyText);
     bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
 
