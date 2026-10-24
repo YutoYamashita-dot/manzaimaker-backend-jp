@@ -586,20 +586,69 @@ function ensureSingleTitle(titleIn, bodyIn) {
  * ========================= */
 
 function parseCharacterNames(charDesc) {
-  if (!charDesc) return { bokeName: "A", tsukkomiName: "B" };
-  const parts = String(charDesc)
-    .split(/[、,，／/・\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
+  // The request's order is authoritative: first = left, second = right.
+  // Read explicitly labeled pairs BEFORE splitting punctuation so "左: 猫 / 右: パンダ" stays aligned.
+  const source = String(charDesc || "").trim().replace(/\r\n?/g, "\n");
+  const cleanName = (raw) => String(raw || "")
+    .replace(/^[\s]*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
+    .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .trim();
+  const labeled = source.match(/^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*[,、，／/・;；\n]+\s*右(?:側|役)?\s*[:：]\s*(.+)$/s);
+  const parts = labeled ? [labeled[1], labeled[2]] :
+    source.split(/[,、，／/・;；\n]+/).map((name) => name.trim()).filter(Boolean);
+  // Short informal entry often used for two animals, e.g. "パンダと猫".
+  if (!labeled && parts.length === 1) {
+    const pair = parts[0].match(/^(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ)と(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ)$/);
+    if (pair) return { bokeName: pair[1], tsukkomiName: pair[2] };
+  }
   if (parts.length >= 2) {
-    const cleanName = (raw) =>
-      raw.replace(/[（(].*?[）)]/g, "").replace(/^(ボケ|ツッコミ|ボケ役|ツッコミ役)[:：]\s*/, "").trim();
-    const n1 = cleanName(parts[0]) || "A";
-    const n2 = cleanName(parts[1]) || "B";
-    return { bokeName: n1, tsukkomiName: n2 };
+    return { bokeName: cleanName(parts[0]) || "A", tsukkomiName: cleanName(parts[1]) || "B" };
   }
   return { bokeName: "A", tsukkomiName: "B" };
+}
+
+// Do not trust AI's LEFT_COSTUME/RIGHT_COSTUME when a recognizable role is in
+// the user's input. This prevents a panda/cat swap in the metadata itself.
+const ROLE_ANIMAL_COSTUMES = [
+  ["柴犬", "ANIMAL_DOG"], ["番犬", "ANIMAL_DOG"], ["犬", "ANIMAL_DOG"], ["狼", "ANIMAL_DOG"],
+  ["猫", "ANIMAL_CAT"], ["ニャンコ", "ANIMAL_CAT"], ["ライオン", "ANIMAL_CAT"], ["虎", "ANIMAL_CAT"],
+  ["パンダ", "ANIMAL_PANDA"], ["ゴリラ", "ANIMAL_GORILLA"], ["チンパンジー", "ANIMAL_GORILLA"],
+  ["クマ", "ANIMAL_BEAR"], ["熊", "ANIMAL_BEAR"], ["ウサギ", "ANIMAL_RABBIT"], ["うさぎ", "ANIMAL_RABBIT"], ["兎", "ANIMAL_RABBIT"],
+  ["ペンギン", "ANIMAL_BIRD_PENGUIN"], ["タコ", "ANIMAL_OCTOPUS"], ["イカ", "ANIMAL_OCTOPUS"],
+  ["宇宙人", "ANIMAL_ALIEN"], ["エイリアン", "ANIMAL_ALIEN"],
+  ["冷蔵庫", "OBJECT_FRIDGE"], ["スマートフォン", "OBJECT_SMARTPHONE"], ["スマホ", "OBJECT_SMARTPHONE"],
+  ["りんご", "OBJECT_APPLE"], ["リンゴ", "OBJECT_APPLE"], ["おにぎり", "OBJECT_ONIGIRI"],
+  ["信号機", "OBJECT_TRAFFIC_LIGHT"], ["聖剣", "OBJECT_SWORD"], ["魔剣", "OBJECT_SWORD"],
+  ["トイレ", "OBJECT_TOILET"], ["便器", "OBJECT_TOILET"], ["ロボット", "OBJECT_ROBOT"]
+];
+const HUMAN_ROLE_WORDS = [
+  "店員", "客", "飼育員", "飼育担当", "飼い主", "美容師", "医者", "看護師", "患者", "先生", "教師", "生徒",
+  "刑事", "警官", "警察", "上司", "部下", "社長", "運転手", "司会", "人間", "スタッフ", "社員", "係員", "応募者", "面接官", "世話係"
+];
+function inferRoleCostume(role) {
+  const name = String(role || "").trim().replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "");
+  let candidate = "", animalPosition = -1;
+  for (const [keyword, code] of ROLE_ANIMAL_COSTUMES) {
+    const pos = name.lastIndexOf(keyword);
+    if (pos < 0) continue;
+    const after = name.slice(pos + keyword.length);
+    if (/^(好き|派|カフェ|の飼い主|を飼う|のファン)/.test(after)) continue;
+    if (pos >= animalPosition) { candidate = code; animalPosition = pos; }
+  }
+  const humanPosition = Math.max(-1, ...HUMAN_ROLE_WORDS.map((word) => name.lastIndexOf(word)));
+  if (humanPosition > animalPosition) return { kind: "human", costume: "" };
+  if (candidate) return { kind: "nonhuman", costume: candidate };
+  if (humanPosition >= 0) return { kind: "human", costume: "" };
+  return { kind: "unknown", costume: "" };
+}
+
+function reconcileRoleCostume(role, generatedCode) {
+  const inferred = inferRoleCostume(role);
+  const aiCode = String(generatedCode || "").trim().toUpperCase();
+  if (inferred.kind === "nonhuman") return inferred.costume;
+  if (inferred.kind === "human" && /^(ANIMAL_|OBJECT_)/.test(aiCode)) return "CASUAL_PLAIN";
+  return aiCode;
 }
 
 function buildPromptByMode({
@@ -711,6 +760,8 @@ function buildPromptByMode({
       `【ジャンル・作風】${safeGenre}`,
       `【登場人物・配役】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
       `※左側のボケ役を「${bokeName}」、右側のツッコミ役を「${tsukkomiName}」として台詞を書いてください。`,
+      `※配役を絶対に入れ替えないこと。左（${bokeName}）と右（${tsukkomiName}）はセリフ・衣装・動物の種類が常に一致すること。パンダと猫は特に混同しない。`,
+      `※話者名には「${bokeName}」「${tsukkomiName}」を毎回そのまま使い、別名・A/B・役の略称へ置き換えないこと。`,
       `【目標文字数】${targetLen}文字（${minLen}〜${maxLen}文字程度）`,
       "",
       "【採用するコント技法】",
@@ -760,6 +811,7 @@ function buildPromptByMode({
       structureMeta,
       maxLen,
       minLen,
+      bokeName,
       tsukkomiName,
       targetLen,
       safeTheme,
@@ -1131,6 +1183,7 @@ export default async function handler(req, res) {
       structureMeta,
       minLen,
       maxLen,
+      bokeName,
       tsukkomiName,
       targetLen,
       safeTheme,
@@ -1158,7 +1211,9 @@ export default async function handler(req, res) {
       .replace(/\s*```$/i, "")
       .trim();
 
-    const { cleanedRaw, stageStyle, leftCostume, rightCostume } = extractStageMetaAndClean(raw);
+    const { cleanedRaw, stageStyle, leftCostume: aiLeftCostume, rightCostume: aiRightCostume } = extractStageMetaAndClean(raw);
+    const leftCostume = mode === "conte" ? reconcileRoleCostume(bokeName, aiLeftCostume) : aiLeftCostume;
+    const rightCostume = mode === "conte" ? reconcileRoleCostume(tsukkomiName, aiRightCostume) : aiRightCostume;
 
     let { title, body: generatedBody } = splitTitleAndBody(cleanedRaw);
     const normalized = ensureSingleTitle(title, generatedBody);
@@ -1182,7 +1237,9 @@ export default async function handler(req, res) {
       charDesc,
       stageStyle ? `STAGE:${stageStyle}` : "",
       leftCostume ? `LEFT_COSTUME:${leftCostume}` : "",
-      rightCostume ? `RIGHT_COSTUME:${rightCostume}` : ""
+      rightCostume ? `RIGHT_COSTUME:${rightCostume}` : "",
+      mode === "conte" ? `LEFT_ROLE:${bokeName.replace(/[|\r\n]/g, " ")}` : "",
+      mode === "conte" ? `RIGHT_ROLE:${tsukkomiName.replace(/[|\r\n]/g, " ")}` : ""
     ].filter(Boolean).join(" | ");
 
     return res.status(200).json({
@@ -1201,6 +1258,8 @@ export default async function handler(req, res) {
         stage_style: stageStyle,
         left_costume: leftCostume,
         right_costume: rightCostume,
+        left_role: mode === "conte" ? bokeName : "",
+        right_role: mode === "conte" ? tsukkomiName : "",
         structure: structureMeta,
         techniques: techniquesForMeta,
         usage_count: consumption.output_count ?? 0,
