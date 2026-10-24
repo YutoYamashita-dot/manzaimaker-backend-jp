@@ -71,10 +71,7 @@ const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
 
 function resolveQuotaByPlan(plan_type = "", mode = "manzai", verifiedIOS = false) {
-  // App Attest 検証済みの iPhone 漫才メーカーは無料3回。
   if (mode === "manzai" && verifiedIOS) return FREE_QUOTA_IOS_NEW;
-  // 暫定互換性: 検証なしの漫才は従来の500回枠。
-  // これはAndroidの真正性を証明しないため、本番用の安全な分離ではない。
   if (mode === "manzai") return FREE_QUOTA_DEFAULT;
   if (plan_type === "conte_ios_unlimited") return FREE_QUOTA_IOS_NEW;
   if (plan_type === "conte_android_free_10") return FREE_QUOTA_ANDROID_AD;
@@ -290,6 +287,166 @@ function resolveTechKey(item, table) {
 }
 
 /* =========================
+ * 配役・衣装・話者名の厳密解決ユーティリティ
+ * ========================= */
+
+const ROLE_ANIMAL_COSTUMES = [
+  ["柴犬", "ANIMAL_DOG"], ["番犬", "ANIMAL_DOG"], ["犬", "ANIMAL_DOG"], ["イヌ", "ANIMAL_DOG"], ["狼", "ANIMAL_DOG"],
+  ["猫", "ANIMAL_CAT"], ["ネコ", "ANIMAL_CAT"], ["ニャンコ", "ANIMAL_CAT"], ["ライオン", "ANIMAL_CAT"], ["虎", "ANIMAL_CAT"],
+  ["パンダ", "ANIMAL_PANDA"], ["ゴリラ", "ANIMAL_GORILLA"], ["チンパンジー", "ANIMAL_GORILLA"], ["猿", "ANIMAL_GORILLA"],
+  ["クマ", "ANIMAL_BEAR"], ["熊", "ANIMAL_BEAR"], ["ヒグマ", "ANIMAL_BEAR"],
+  ["ウサギ", "ANIMAL_RABBIT"], ["うさぎ", "ANIMAL_RABBIT"], ["兎", "ANIMAL_RABBIT"],
+  ["ペンギン", "ANIMAL_BIRD_PENGUIN"], ["鳥", "ANIMAL_BIRD_PENGUIN"],
+  ["タコ", "ANIMAL_OCTOPUS"], ["イカ", "ANIMAL_OCTOPUS"],
+  ["宇宙人", "ANIMAL_ALIEN"], ["エイリアン", "ANIMAL_ALIEN"],
+  ["冷蔵庫", "OBJECT_FRIDGE"], ["スマートフォン", "OBJECT_SMARTPHONE"], ["スマホ", "OBJECT_SMARTPHONE"],
+  ["りんご", "OBJECT_APPLE"], ["リンゴ", "OBJECT_APPLE"], ["おにぎり", "OBJECT_ONIGIRI"],
+  ["信号機", "OBJECT_TRAFFIC_LIGHT"], ["聖剣", "OBJECT_SWORD"], ["魔剣", "OBJECT_SWORD"],
+  ["トイレ", "OBJECT_TOILET"], ["便器", "OBJECT_TOILET"], ["ロボット", "OBJECT_ROBOT"]
+];
+
+const ROLE_HUMAN_COSTUMES = [
+  ["美容師", "BARBER_SCISSORS"], ["理容師", "BARBER_SCISSORS"],
+  ["銀行強盗", "ROBBER_MASK"], ["強盗", "ROBBER_MASK"], ["泥棒", "ROBBER_MASK"], ["怪盗", "ROBBER_MASK"],
+  ["刑事", "POLICE_DETECTIVE"], ["警察", "POLICE_DETECTIVE"], ["警官", "POLICE_DETECTIVE"],
+  ["容疑者", "SUSPECT_GLASSES"], ["犯人", "SUSPECT_GLASSES"],
+  ["医者", "DOCTOR_COAT"], ["医師", "DOCTOR_COAT"], ["院長", "DOCTOR_COAT"], ["執刀医", "DOCTOR_COAT"], ["看護師", "DOCTOR_COAT"],
+  ["患者", "PATIENT_BANDAGE"],
+  ["先生", "TEACHER_POINTER"], ["教師", "TEACHER_POINTER"], ["担任", "TEACHER_POINTER"], ["教頭", "TEACHER_POINTER"], ["校長", "TEACHER_POINTER"],
+  ["生徒", "STUDENT_CAP"], ["学生", "STUDENT_CAP"],
+  ["ウェイター", "WAITER_TRAY"], ["ギャルソン", "WAITER_TRAY"],
+  ["シェフ", "CHEF_HAT"], ["大将", "CHEF_HAT"], ["料理長", "CHEF_HAT"],
+  ["面接官", "BOSS_RED_TIE"], ["社長", "BOSS_RED_TIE"], ["上司", "BOSS_RED_TIE"], ["部長", "BOSS_RED_TIE"], ["課長", "BOSS_RED_TIE"],
+  ["応募者", "APPLICANT_BLUE_TIE"], ["就活生", "APPLICANT_BLUE_TIE"], ["部下", "APPLICANT_BLUE_TIE"], ["新入社員", "APPLICANT_BLUE_TIE"],
+  ["勇者", "HERO_SWORD"], ["騎士", "HERO_SWORD"],
+  ["魔王", "DEMON_MAGE_STAFF"], ["魔法使い", "DEMON_MAGE_STAFF"],
+  ["運転手", "DRIVER_CAP"], ["タクシードライバー", "DRIVER_CAP"], ["ドライバー", "DRIVER_CAP"],
+  ["トレーナー", "ATHLETE_HEADBAND"], ["格闘家", "ATHLETE_HEADBAND"], ["ボクサー", "ATHLETE_HEADBAND"],
+  ["司会", "MC_MIC"], ["アナウンサー", "MC_MIC"], ["MC", "MC_MIC"],
+  ["駅員", "STATION_STAFF"], ["車掌", "STATION_STAFF"], ["警備員", "STATION_STAFF"],
+  ["店員", "CLERK_APRON"], ["バイト", "CLERK_APRON"], ["店長", "CLERK_APRON"],
+  ["買い物客", "SHOPPER_BAG"], ["お客", "SHOPPER_BAG"], ["客", "SHOPPER_BAG"]
+];
+
+const HUMAN_ROLE_WORDS = [
+  "店員", "バイト", "店長", "客", "お客", "飼育員", "飼育担当", "飼い主", "美容師", "理容師",
+  "医者", "医師", "看護師", "患者", "先生", "教師", "担任", "生徒", "学生",
+  "刑事", "警官", "警察", "容疑者", "犯人", "強盗", "泥棒",
+  "上司", "部下", "社長", "部長", "応募者", "面接官", "就活生", "社員",
+  "運転手", "ドライバー", "司会", "人間", "スタッフ", "係員", "世話係",
+  "勇者", "魔王", "ウェイター", "シェフ", "大将", "駅員", "車掌", "トレーナー"
+];
+
+function inferRoleCostume(role) {
+  const name = String(role || "")
+    .trim()
+    .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "");
+
+  let animalCandidate = "";
+  let animalPosition = -1;
+  for (const [keyword, code] of ROLE_ANIMAL_COSTUMES) {
+    const pos = name.lastIndexOf(keyword);
+    if (pos < 0) continue;
+    const after = name.slice(pos + keyword.length);
+    if (/^(好き|派|カフェ|の飼い主|を飼う|のファン|担当|係)/.test(after)) continue;
+    if (pos >= animalPosition) {
+      animalCandidate = code;
+      animalPosition = pos;
+    }
+  }
+
+  let humanCandidate = "";
+  let humanPosition = -1;
+  for (const [keyword, code] of ROLE_HUMAN_COSTUMES) {
+    const pos = name.lastIndexOf(keyword);
+    if (pos < 0) continue;
+    const after = name.slice(pos + keyword.length);
+    // 「面接官を採点する応募者」のように目的語として前に出ている語よりも末尾の主語を優先
+    if (/^(を|に|と|より|から|の)/.test(after) && pos < name.length - keyword.length - 1) {
+      if (humanPosition < 0) {
+        humanCandidate = code;
+        humanPosition = pos;
+      }
+      continue;
+    }
+    if (pos >= humanPosition) {
+      humanCandidate = code;
+      humanPosition = pos;
+    }
+  }
+
+  const maxGenericHumanPos = Math.max(-1, ...HUMAN_ROLE_WORDS.map((w) => name.lastIndexOf(w)));
+  const finalHumanPos = Math.max(humanPosition, maxGenericHumanPos);
+
+  if (finalHumanPos > animalPosition) {
+    return { kind: "human", costume: humanCandidate || "CASUAL_PLAIN" };
+  }
+  if (animalCandidate) {
+    return { kind: "nonhuman", costume: animalCandidate };
+  }
+  if (finalHumanPos >= 0) {
+    return { kind: "human", costume: humanCandidate || "CASUAL_PLAIN" };
+  }
+  return { kind: "unknown", costume: "" };
+}
+
+function reconcileRoleCostume(role, generatedCode) {
+  const inferred = inferRoleCostume(role);
+  const aiCode = String(generatedCode || "").trim().toUpperCase();
+  if (inferred.kind === "nonhuman") {
+    return inferred.costume;
+  }
+  if (inferred.kind === "human") {
+    // 役名から明確な人間コスチューム（CLERK_APRON等）が特定できた場合はそれを最優先する（AIの左右逆転を防ぐ）
+    if (inferred.costume && inferred.costume !== "CASUAL_PLAIN") {
+      return inferred.costume;
+    }
+    if (/^(ANIMAL_|OBJECT_)/.test(aiCode)) {
+      return "CASUAL_PLAIN";
+    }
+    return aiCode || "CASUAL_PLAIN";
+  }
+  return aiCode;
+}
+
+function parseCharacterNames(charDesc) {
+  const source = String(charDesc || "").trim().replace(/\r\n?/g, "\n");
+  const cleanName = (raw) =>
+    String(raw || "")
+      .replace(/^\s*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
+      .replace(/^\s*(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
+      .replace(/[（(](?:ボケ役?|ツッコミ役?|左(?:側|役)?|右(?:側|役)?)[）)]/g, "")
+      .trim();
+
+  const labeled = source.match(
+    /^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*(?:[,、，／/;；\n]|\s+・\s+|・)\s*右(?:側|役)?\s*[:：]\s*(.+?)\s*$/s
+  );
+  if (labeled) {
+    return {
+      bokeName: cleanName(labeled[1]) || "A",
+      tsukkomiName: cleanName(labeled[2]) || "B"
+    };
+  }
+
+  let parts = source.split(/[,、，／/;；\n]+/).map(cleanName).filter(Boolean);
+  if (parts.length < 2) {
+    parts = source.split(/\s+・\s+/).map(cleanName).filter(Boolean);
+  }
+  if (parts.length < 2) {
+    const byTo = source.split(/\s*と\s*/).map(cleanName).filter(Boolean);
+    if (byTo.length === 2) parts = byTo;
+  }
+  if (parts.length < 2 && source.includes("・")) {
+    const byDot = source.split("・").map(cleanName).filter(Boolean);
+    if (byDot.length === 2) parts = byDot;
+  }
+  if (parts.length >= 2) {
+    return { bokeName: parts[0], tsukkomiName: parts[1] };
+  }
+  return { bokeName: "A", tsukkomiName: "B" };
+}
+
+/* =========================
  * 文字数・整形ユーティリティ
  * ========================= */
 
@@ -394,41 +551,91 @@ function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
   return t ? `${t}\n\n${outro}` : outro;
 }
 
-// 役名のゆれを照合し、判定できた台詞をユーザーが指定した正式な左/右の配役名へ統一する。
-// これにより iOS の口パク・声色・動物Spriteの左右が同じ話者名を使える。
-// 本文（台詞そのもの）は変えない。曖昧な台詞を別の役に強制的に付け替えない。
 function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
-  if (!leftRole || !rightRole || leftRole === "A" && rightRole === "B") return text;
-  const normalize = (s) => String(s || "")
-    .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
-    .replace(/[（(][^）)]*[）)]/g, "")
-    .replace(/[\s　「」『』]/g, "")
-    .replace(/スマートフォン/g, "スマホ")
-    .replace(/ネコ/g, "猫").replace(/イヌ/g, "犬").replace(/うさぎ/g, "ウサギ");
+  if (!leftRole || !rightRole || (leftRole === "A" && rightRole === "B")) return text;
+
+  const normalize = (s) =>
+    String(s || "")
+      .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
+      .replace(/[（(][^）)]*[）)]/g, "")
+      .replace(/[\s 「」『』]/g, "")
+      .replace(/スマートフォン/g, "スマホ")
+      .replace(/ネコ/g, "猫")
+      .replace(/イヌ/g, "犬")
+      .replace(/うさぎ/g, "ウサギ");
+
   const cast = [normalize(leftRole), normalize(rightRole)];
+  const castInferred = [inferRoleCostume(cast[0]), inferRoleCostume(cast[1])];
+
   const normalizeSideHint = (original) => {
     const s = String(original || "").trim();
-    if (/^(?:左(?:側|役)?|ボケ|A|①|1)(?:[（(].*?[）)])?$/.test(s)) return 0;
-    if (/^(?:右(?:側|役)?|ツッコミ|B|②|2)(?:[（(].*?[）)])?$/.test(s)) return 1;
+    if (/^(?:左(?:側|役)?|ボケ役?|A|①|1)(?:[（(].*?[）)])?$/.test(s)) return 0;
+    if (/^(?:右(?:側|役)?|ツッコミ役?|B|②|2)(?:[（(].*?[）)])?$/.test(s)) return 1;
+    if (/^(?:左|ボケ)[:：]/.test(s)) return 0;
+    if (/^(?:右|ツッコミ)[:：]/.test(s)) return 1;
     return null;
   };
-  const matchScore = (speaker, role) => {
+
+  const matchScore = (speaker, sideIdx) => {
+    const role = cast[sideIdx];
     if (!speaker || !role) return 0;
-    if (speaker === role) return 120;
-    const leftKind = inferRoleCostume(speaker);
-    const rightKind = inferRoleCostume(role);
-    if (leftKind.kind === "nonhuman") {
-      if (rightKind.kind === "human") return 0;
-      if (rightKind.kind === "nonhuman" && leftKind.costume !== rightKind.costume) return 0;
+    if (speaker === role) return 150;
+
+    const spkKind = inferRoleCostume(speaker);
+    const roleKind = castInferred[sideIdx];
+
+    if (spkKind.kind === "nonhuman") {
+      if (roleKind.kind === "human") return 0;
+      if (roleKind.kind === "nonhuman") {
+        return spkKind.costume === roleKind.costume ? 130 : 0;
+      }
     }
-    if (speaker.length >= 2 && role.endsWith(speaker)) return 105;
-    if (speaker.length >= 2 && role.startsWith(speaker)) return 90;
-    if (speaker.length >= 2 && role.includes(speaker)) return 65;
-    if (role.length >= 3 && speaker.includes(role)) return 60;
-    const aliases = { "犬":"柴犬", "ネコ":"猫", "お客さん":"客", "お客":"客", "店長":"店員", "飼育担当":"飼育員" };
-    if (aliases[speaker] && role.includes(aliases[speaker])) return 58;
+    if (spkKind.kind === "human" && roleKind.kind === "nonhuman") {
+      return 0;
+    }
+    if (
+      spkKind.kind === "human" &&
+      roleKind.kind === "human" &&
+      spkKind.costume !== "CASUAL_PLAIN" &&
+      roleKind.costume !== "CASUAL_PLAIN" &&
+      spkKind.costume === roleKind.costume
+    ) {
+      return 115;
+    }
+
+    if (speaker.length >= 2 && role.endsWith(speaker)) return 110;
+    if (speaker.length >= 2 && role.startsWith(speaker)) return 95;
+    if (speaker.length >= 2 && role.includes(speaker)) return 80;
+    if (role.length >= 2 && speaker.includes(role)) return 75;
+
+    const aliases = {
+      "犬": "柴犬",
+      "ワンコ": "柴犬",
+      "番犬": "犬",
+      "ネコ": "猫",
+      "ニャンコ": "猫",
+      "お客さん": "客",
+      "お客": "客",
+      "買い物客": "客",
+      "店員さん": "店員",
+      "バイト": "店員",
+      "店長": "店員",
+      "飼育担当": "飼育員",
+      "お医者さん": "医者",
+      "医師": "医者",
+      "ドクター": "医者",
+      "先生": "教師",
+      "警官": "刑事",
+      "警察官": "刑事",
+      "犯人": "容疑者",
+      "強盗": "銀行強盗",
+      "ドライバー": "運転手"
+    };
+    const canonical = aliases[speaker] || speaker;
+    if (canonical !== speaker && role.includes(canonical)) return 70;
     return 0;
   };
+
   const lines = String(text).split("\n");
   const labels = [];
   for (const line of lines) {
@@ -438,36 +645,46 @@ function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
       if (!labels.includes(name)) labels.push(name);
     }
   }
+
   const assigned = new Map();
   for (const label of labels) {
     const hint = normalizeSideHint(label);
-    if (hint !== null) { assigned.set(label, hint); continue; }
+    if (hint !== null) {
+      assigned.set(label, hint);
+      continue;
+    }
     const name = normalize(label);
-    const scores = cast.map((role) => matchScore(name, role));
-    if (scores[0] > scores[1] && scores[0] >= 58) assigned.set(label, 0);
-    else if (scores[1] > scores[0] && scores[1] >= 58) assigned.set(label, 1);
+    const s0 = matchScore(name, 0);
+    const s1 = matchScore(name, 1);
+    if (s0 > s1 && s0 >= 55) assigned.set(label, 0);
+    else if (s1 > s0 && s1 >= 55) assigned.set(label, 1);
   }
-  // 片側が確定し他に未知名が一つの場合に限り、残る役へ対応させる。
+
   const unknown = labels.filter((label) => !assigned.has(label));
   const used = new Set(assigned.values());
   if (unknown.length === 1 && used.size === 1) {
     const vacant = used.has(0) ? 1 : 0;
     const spokenKind = inferRoleCostume(normalize(unknown[0]));
-    const vacantKind = inferRoleCostume(cast[vacant]);
-    // 「猫カフェの店員」をAIが「猫」と誤表記した際など、動物の種類が
-    // 一致しない台詞を反対側へ強制割り当てしない。
-    if (spokenKind.kind !== "nonhuman" ||
-        (vacantKind.kind === "nonhuman" && spokenKind.costume === vacantKind.costume)) {
+    const vacantKind = castInferred[vacant];
+    if (
+      spokenKind.kind !== "nonhuman" ||
+      (vacantKind.kind === "nonhuman" && spokenKind.costume === vacantKind.costume)
+    ) {
       assigned.set(unknown[0], vacant);
     }
+  } else if (unknown.length === 2 && used.size === 0) {
+    assigned.set(unknown[0], 0);
+    assigned.set(unknown[1], 1);
   }
 
-  return lines.map((line) => {
-    const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
-    if (!m || !assigned.has(m[2].trim())) return line;
-    const roleName = assigned.get(m[2].trim()) === 0 ? leftRole : rightRole;
-    return `${m[1]}${roleName}: ${m[3].trimStart()}`;
-  }).join("\n");
+  return lines
+    .map((line) => {
+      const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
+      if (!m || !assigned.has(m[2].trim())) return line;
+      const roleName = assigned.get(m[2].trim()) === 0 ? leftRole : rightRole;
+      return `${m[1]}${roleName}: ${m[3].trimStart()}`;
+    })
+    .join("\n");
 }
 
 function normalizeSpeakerColons(s) {
@@ -514,7 +731,7 @@ function splitTitleAndBody(s) {
   const trimmed = String(s).trim();
 
   const firstLine = trimmed.split(/\r?\n/)[0].trim();
-  if (/^[^:\n：]{1,12}[：:]\s*\S/.test(firstLine) && !/^(タイトル|Title)/i.test(firstLine)) {
+  if (/^[^:\n：]{1,25}[：:]\s*\S/.test(firstLine) && !/^(タイトル|Title)/i.test(firstLine)) {
     return { title: "", body: trimmed };
   }
 
@@ -568,7 +785,7 @@ function ensureSingleTitle(titleIn, bodyIn) {
       title = normalizeTitleString(first);
       lines.shift();
       while (lines.length && lines[0].trim() === "") {
-lines.shift();
+        lines.shift();
       }
     }
   }
@@ -601,70 +818,6 @@ lines.shift();
 /* =========================
  * ガイドライン・プロンプト作成（漫才・コント両対応）
  * ========================= */
-
-function parseCharacterNames(charDesc) {
-  // 左右の配役はリクエストの順序で固定し、AIが名前や衣装を入れ替えても上書きしない。
-  const source = String(charDesc || "").trim().replace(/\r\n?/g, "\n");
-  const cleanName = (raw) => String(raw || "")
-    .replace(/^\s*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
-    .replace(/^\s*(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
-    .trim();
-  const labeled = source.match(/^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*(?:[,、，／/;；\n]|\s+・\s+|・)\s*右(?:側|役)?\s*[:：]\s*(.+?)\s*$/s);
-  if (labeled) return { bokeName: cleanName(labeled[1]) || "A", tsukkomiName: cleanName(labeled[2]) || "B" };
-
-  // 中点「・」は役名の一部にも使うため、原則として区切りに使わない。
-  let parts = source.split(/[,、，／/;；\n]+/).map(cleanName).filter(Boolean);
-  if (parts.length < 2) parts = source.split(/\s+・\s+/).map(cleanName).filter(Boolean);
-  if (parts.length < 2) {
-    const pair = source.match(/^(パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ|冷蔵庫|スマホ|ロボット)[・と](パンダ|猫|犬|柴犬|ゴリラ|クマ|ウサギ|ペンギン|タコ|冷蔵庫|スマホ|ロボット)$/);
-    if (pair) return { bokeName: pair[1], tsukkomiName: pair[2] };
-  }
-  if (parts.length >= 2) return { bokeName: parts[0], tsukkomiName: parts[1] };
-  return { bokeName: "A", tsukkomiName: "B" };
-}
-
-// Do not trust AI's LEFT_COSTUME/RIGHT_COSTUME when a recognizable role is in
-// the user's input. This prevents a panda/cat swap in the metadata itself.
-const ROLE_ANIMAL_COSTUMES = [
-  ["柴犬", "ANIMAL_DOG"], ["番犬", "ANIMAL_DOG"], ["犬", "ANIMAL_DOG"], ["狼", "ANIMAL_DOG"],
-  ["猫", "ANIMAL_CAT"], ["ニャンコ", "ANIMAL_CAT"], ["ライオン", "ANIMAL_CAT"], ["虎", "ANIMAL_CAT"],
-  ["パンダ", "ANIMAL_PANDA"], ["ゴリラ", "ANIMAL_GORILLA"], ["チンパンジー", "ANIMAL_GORILLA"],
-  ["クマ", "ANIMAL_BEAR"], ["熊", "ANIMAL_BEAR"], ["ウサギ", "ANIMAL_RABBIT"], ["うさぎ", "ANIMAL_RABBIT"], ["兎", "ANIMAL_RABBIT"],
-  ["ペンギン", "ANIMAL_BIRD_PENGUIN"], ["タコ", "ANIMAL_OCTOPUS"], ["イカ", "ANIMAL_OCTOPUS"],
-  ["宇宙人", "ANIMAL_ALIEN"], ["エイリアン", "ANIMAL_ALIEN"],
-  ["冷蔵庫", "OBJECT_FRIDGE"], ["スマートフォン", "OBJECT_SMARTPHONE"], ["スマホ", "OBJECT_SMARTPHONE"],
-  ["りんご", "OBJECT_APPLE"], ["リンゴ", "OBJECT_APPLE"], ["おにぎり", "OBJECT_ONIGIRI"],
-  ["信号機", "OBJECT_TRAFFIC_LIGHT"], ["聖剣", "OBJECT_SWORD"], ["魔剣", "OBJECT_SWORD"],
-  ["トイレ", "OBJECT_TOILET"], ["便器", "OBJECT_TOILET"], ["ロボット", "OBJECT_ROBOT"]
-];
-const HUMAN_ROLE_WORDS = [
-  "店員", "客", "飼育員", "飼育担当", "飼い主", "美容師", "医者", "看護師", "患者", "先生", "教師", "生徒",
-  "刑事", "警官", "警察", "上司", "部下", "社長", "運転手", "司会", "人間", "スタッフ", "社員", "係員", "応募者", "面接官", "世話係"
-];
-function inferRoleCostume(role) {
-  const name = String(role || "").trim().replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "");
-  let candidate = "", animalPosition = -1;
-  for (const [keyword, code] of ROLE_ANIMAL_COSTUMES) {
-    const pos = name.lastIndexOf(keyword);
-    if (pos < 0) continue;
-    const after = name.slice(pos + keyword.length);
-    if (/^(好き|派|カフェ|の飼い主|を飼う|のファン)/.test(after)) continue;
-    if (pos >= animalPosition) { candidate = code; animalPosition = pos; }
-  }
-  const humanPosition = Math.max(-1, ...HUMAN_ROLE_WORDS.map((word) => name.lastIndexOf(word)));
-  if (humanPosition > animalPosition) return { kind: "human", costume: "" };
-  if (candidate) return { kind: "nonhuman", costume: candidate };
-  if (humanPosition >= 0) return { kind: "human", costume: "" };
-  return { kind: "unknown", costume: "" };
-}
-
-function reconcileRoleCostume(role, generatedCode) {
-  const inferred = inferRoleCostume(role);
-  const aiCode = String(generatedCode || "").trim().toUpperCase();
-  if (inferred.kind === "nonhuman") return inferred.costume;
-  if (inferred.kind === "human" && /^(ANIMAL_|OBJECT_)/.test(aiCode)) return "CASUAL_PLAIN";
-  return aiCode;
-}
 
 function buildPromptByMode({
   mode = "manzai",
@@ -701,20 +854,26 @@ function buildPromptByMode({
     general: toLabel(general, generalTable)
   };
 
-  const bokeLines = boke.map((k) => {
-    const key = resolveTechKey(k, bokeTable);
-    return key ? `- ${bokeTable[key]}` : `- ${k}`;
-  }).filter(Boolean);
+  const bokeLines = boke
+    .map((k) => {
+      const key = resolveTechKey(k, bokeTable);
+      return key ? `- ${bokeTable[key]}` : `- ${k}`;
+    })
+    .filter(Boolean);
 
-  const tsukkomiLines = tsukkomi.map((k) => {
-    const key = resolveTechKey(k, tsukkomiTable);
-    return key ? `- ${tsukkomiTable[key]}` : `- ${k}`;
-  }).filter(Boolean);
+  const tsukkomiLines = tsukkomi
+    .map((k) => {
+      const key = resolveTechKey(k, tsukkomiTable);
+      return key ? `- ${tsukkomiTable[key]}` : `- ${k}`;
+    })
+    .filter(Boolean);
 
-  const generalLines = general.map((k) => {
-    const key = resolveTechKey(k, generalTable);
-    return key ? `- ${generalTable[key]}` : `- ${k}`;
-  }).filter(Boolean);
+  const generalLines = general
+    .map((k) => {
+      const key = resolveTechKey(k, generalTable);
+      return key ? `- ${generalTable[key]}` : `- ${k}`;
+    })
+    .filter(Boolean);
 
   const guidelineParts = [];
   if (bokeLines.length) guidelineParts.push("【ボケ技法】", ...bokeLines);
@@ -735,15 +894,17 @@ function buildPromptByMode({
 
   const safeTheme = cleanedTheme || (isConte ? "深夜のコンビニ" : "日常生活");
   const safeGenre = String(genre || "").trim() || (isConte ? "コント" : "漫才");
-  const charDesc = typeof characters === "string"
-    ? characters.trim()
-    : JSON.stringify(characters ?? "");
+  const charDesc =
+    typeof characters === "string"
+      ? characters.trim()
+      : JSON.stringify(characters ?? "");
 
   const { bokeName, tsukkomiName } = parseCharacterNames(charDesc);
 
-  const targetLen = Number.isFinite(Number(length)) && Number(length) > 0
-    ? Math.floor(Number(length))
-    : 1000;
+  const targetLen =
+    Number.isFinite(Number(length)) && Number(length) > 0
+      ? Math.floor(Number(length))
+      : 1000;
 
   const minLen = Math.max(100, Math.floor(targetLen * 0.9));
   const maxLen = Math.max(minLen, Math.ceil(targetLen * 1.1));
@@ -767,15 +928,16 @@ function buildPromptByMode({
       "【動物の姿（役名が動物の場合のみ選択）】ANIMAL_DOG (犬・柴犬・狼) / ANIMAL_CAT (猫・虎・ライオン) / ANIMAL_PANDA (パンダ) / ANIMAL_GORILLA (ゴリラ・猿・チンパンジー) / ANIMAL_BEAR (クマ・ヒグマ) / ANIMAL_RABBIT (ウサギ) / ANIMAL_BIRD_PENGUIN (ペンギン・鳥) / ANIMAL_OCTOPUS (タコ・イカ) / ANIMAL_ALIEN (宇宙人)",
       "【物の姿（役名が物の場合のみ選択）】OBJECT_FRIDGE (冷蔵庫・家電) / OBJECT_SMARTPHONE (スマホ・PC) / OBJECT_APPLE (りんご・果物) / OBJECT_ONIGIRI (おにぎり・寿司・食パン) / OBJECT_TRAFFIC_LIGHT (信号機) / OBJECT_SWORD (聖剣・メス・文房具) / OBJECT_TOILET (トイレ・便器) / OBJECT_ROBOT (AIロボット・メカ)"
     ].join("\n");
-const prompt = [
+
+    const prompt = [
       "以下の条件で、日本語のコント（寸劇）台本を1本作成してください。",
       "",
       `【シチュエーション・舞台設定】${safeTheme}`,
       `【ジャンル・作風】${safeGenre}`,
-      `【登場人物・配役】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
+      `【登場人物・配役】左（ボケ役）＝「${bokeName}」、右（ツッコミ役）＝「${tsukkomiName}」`,
       `※左側のボケ役を「${bokeName}」、右側のツッコミ役を「${tsukkomiName}」として台詞を書いてください。`,
-      `※配役を絶対に入れ替えないこと。左（${bokeName}）と右（${tsukkomiName}）はセリフ・衣装・動物の種類が常に一致すること。パンダと猫は特に混同しない。`,
-      `※話者名には「${bokeName}」「${tsukkomiName}」を毎回そのまま使い、別名・A/B・役の略称へ置き換えないこと。`,
+      `※配役を絶対に入れ替えないこと。左（${bokeName}）と右（${tsukkomiName}）はセリフ・衣装・動物の種類が常に一致すること。`,
+      `※各行の話者名には必ず「${bokeName}」「${tsukkomiName}」をそのまま正確に使い、略称やA/Bへ書き換えないこと。`,
       `【目標文字数】${targetLen}文字（${minLen}〜${maxLen}文字程度）`,
       "",
       "【採用するコント技法】",
@@ -886,6 +1048,7 @@ const prompt = [
     structureMeta,
     maxLen,
     minLen,
+    bokeName,
     tsukkomiName,
     targetLen,
     safeTheme,
@@ -967,7 +1130,7 @@ const client = {
         const text = extractTextFromResponse(response);
 
         if (!text) {
-console.warn(
+          console.warn(
             "[openai] response text was empty. status:",
             response?.status,
             "incomplete_details:",
@@ -1019,7 +1182,6 @@ export default async function handler(req, res) {
 
     // 1. 購入クレジット追加 / 買い切りアンロック
     if (action === "add_credits" || action === "add_credit") {
-      // 購入情報は /api/iap/verify で Apple の署名検証後にのみ付与する。
       return res.status(403).json({ error: "Purchase verification required" });
     }
 
@@ -1036,14 +1198,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // ★ 3. AIによる「おまかせ設定」（漫才モードとコントモードの両方に完全対応！クレジット消費なし）
+    // 3. AIによる「おまかせ設定」
     if (
       action === "suggest_setting" ||
       action === "random_preset" ||
       action === "generate_preset"
     ) {
       if (mode === "conte") {
-        // 【コントメーカー用】のおもしろ設定生成
         const conteCategories = [
           "コンビニ・スーパー・ドラッグストアの接客で起きる面白おかしい人間ドラマコント",
           "警察の取調室・探偵事務所・職務質問でクセの強い犯人と刑事の掛け合いコント",
@@ -1063,9 +1224,9 @@ export default async function handler(req, res) {
           "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
           `テーマ：「${pickCat}」`,
           "設定を見ただけで思わず見たくなるような、最高に面白くてユニークな『人間の登場人物2人』によるコント設定を1つ考案してください。",
-          "登場人物には具体的な職業や立場がわかる人間の役名（例：クセが強すぎる新人店員, 普通に買い物したい客／例え話が不吉な医者, 不安になる患者 など）を設定してください。",
+          "登場人物には具体的な職業や立場がわかる人間の役名（例：クセが強すぎる新人店員, 普通に買い物したい客／例え話が不吉な医者, 不安になる患者 など）をカンマ区切りで設定してください。役名の中に中点（・）やカンマは使わないでください。",
           "以下のJSON形式のみを出力してください（説明文やコードブロックは不要）。",
-          '{ "theme": "具体的で面白い舞台・状況（20文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "ボケ役の具体的な人間役名（14文字以内）, ツッコミ役の具体的な人間役名（14文字以内）" }'
+          '{ "theme": "具体的で面白い舞台・状況（20文字以内）", "genre": "作風・ジャンル（14文字以内）", "characters": "左のボケ役の人間役名（14文字以内）, 右のツッコミ役の人間役名（14文字以内）" }'
         ].join("\n");
 
         const aiResp = await client.chat.completions.create({
@@ -1097,7 +1258,6 @@ export default async function handler(req, res) {
           characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
         });
       } else {
-        // ★【漫才メーカー用】のおもしろ設定生成
         const manzaiCategories = [
           "日常のあるある（回転寿司・コンビニ・美容院・電車など）に奇抜な妄想や屁理屈が混ざるしゃべくり漫才",
           "理想のデート・プロポーズ・ヒーローインタビューなどを練習しようとして設定が崩壊するコント漫才",
@@ -1146,13 +1306,12 @@ export default async function handler(req, res) {
         });
       }
     }
+
     // 4. 通常生成（漫才 または コント）
     if (action !== "generate") {
       return res.status(400).json({ error: "Unknown action" });
     }
 
-    // Assertion がある漫才生成は必ずサーバーで検証する。
-    // 注: Assertion を付けないリクエストも互換性のため受理する暫定構成。
     let verifiedIOS = false;
     if (mode === "manzai" && body.app_attest) {
       const attestationResult = await verifyManzaiAssertion(body, body.app_attest);
@@ -1253,15 +1412,20 @@ export default async function handler(req, res) {
 
     const consumption = await consumeAfterSuccess(scopedUserId, plan_type, mode, verifiedIOS);
 
+    const safeLeftRole = bokeName.replace(/[|\r\n]/g, " ");
+    const safeRightRole = tsukkomiName.replace(/[|\r\n]/g, " ");
+
     const fullSettingInfo = [
       safeTheme,
       safeGenre,
-      charDesc,
+      `${safeLeftRole}, ${safeRightRole}`,
+      mode === "conte" ? `CAST_LEFT:${safeLeftRole}` : "",
+      mode === "conte" ? `CAST_RIGHT:${safeRightRole}` : "",
       stageStyle ? `STAGE:${stageStyle}` : "",
       leftCostume ? `LEFT_COSTUME:${leftCostume}` : "",
       rightCostume ? `RIGHT_COSTUME:${rightCostume}` : "",
-      mode === "conte" ? `LEFT_ROLE:${bokeName.replace(/[|\r\n]/g, " ")}` : "",
-      mode === "conte" ? `RIGHT_ROLE:${tsukkomiName.replace(/[|\r\n]/g, " ")}` : ""
+      mode === "conte" ? `LEFT_ROLE:${safeLeftRole}` : "",
+      mode === "conte" ? `RIGHT_ROLE:${safeRightRole}` : ""
     ].filter(Boolean).join(" | ");
 
     return res.status(200).json({
