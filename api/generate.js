@@ -1,4 +1,5 @@
-// api/generate.js
+
+ // api/generate.js
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -17,17 +18,30 @@ const supabase = hasSupabase
  * ========================= */
 
 function detectAppMode(body = {}) {
-  const explicitMode = String(body.mode || body.app_mode || body.type || "").trim().toLowerCase();
-  if (explicitMode === "conte" || explicitMode === "skit" || explicitMode === "コント") {
+  const explicitMode = String(
+    body.mode || body.app_mode || body.type || ""
+  ).trim().toLowerCase();
+
+  if (
+    explicitMode === "conte" ||
+    explicitMode === "skit" ||
+    explicitMode === "コント"
+  ) {
     return "conte";
   }
-  if (explicitMode === "manzai" || explicitMode === "漫才") {
+
+  if (
+    explicitMode === "manzai" ||
+    explicitMode === "漫才"
+  ) {
     return "manzai";
   }
 
   const genre = String(body.genre || "").trim();
   const theme = String(body.theme || "").trim();
-  const planType = String(body.plan_type || "").trim().toLowerCase();
+  const planType = String(
+    body.plan_type || ""
+  ).trim().toLowerCase();
 
   if (
     planType.includes("conte") ||
@@ -44,7 +58,11 @@ function detectAppMode(body = {}) {
     ...(Array.isArray(body.general) ? body.general : [])
   ].join(" ");
 
-  if (/(キャラ憑依|状況ズレ|マイム|サイコパス|キレ芸|ノリツッコミ|伏線回収オチ|すれ違いコント)/.test(allTechs)) {
+  if (
+    /(キャラ憑依|状況ズレ|マイム|サイコパス|キレ芸|ノリツッコミ|伏線回収オチ|すれ違いコント)/.test(
+      allTechs
+    )
+  ) {
     return "conte";
   }
 
@@ -53,10 +71,15 @@ function detectAppMode(body = {}) {
 
 function resolveScopedUserId(rawUserId, mode) {
   const id = String(rawUserId || "").trim();
+
   if (!id) return "";
+
   if (mode === "conte") {
-    return id.startsWith("conte_") ? id : `conte_${id}`;
+    return id.startsWith("conte_")
+      ? id
+      : `conte_${id}`;
   }
+
   return id;
 }
 
@@ -69,15 +92,38 @@ const FREE_QUOTA_IOS_NEW = 3;
 const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
 
-function resolveQuotaByPlan(plan_type = "") {
-  if (plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited") return FREE_QUOTA_IOS_NEW;
-  if (plan_type === "android_free_10" || plan_type === "conte_android_free_10") return FREE_QUOTA_ANDROID_AD;
+function resolveQuotaByPlan(
+  plan_type = "",
+  mode = "manzai"
+) {
+  // 安全優先：公開APIのplan_typeは端末側で
+  // 偽装できるため、漫才生成は一律3回に制限する。
+  // Androidの既存枠との分離には、
+  // 別途、サーバー検証可能なアプリ識別が必要。
+
+  if (mode === "manzai") {
+    return FREE_QUOTA_IOS_NEW;
+  }
+
+  if (plan_type === "conte_ios_unlimited") {
+    return FREE_QUOTA_IOS_NEW;
+  }
+
+  if (plan_type === "conte_android_free_10") {
+    return FREE_QUOTA_ANDROID_AD;
+  }
+
   return FREE_QUOTA_DEFAULT;
 }
 
 async function getUsageRow(scoped_user_id) {
   if (!hasSupabase || !scoped_user_id) {
-    return { output_count: 0, paid_credits: 0 };
+    throw Object.assign(
+      new Error(
+        "Usage service unavailable or user_id missing"
+      ),
+      { status: 503 }
+    );
   }
 
   try {
@@ -88,15 +134,37 @@ async function getUsageRow(scoped_user_id) {
       .maybeSingle();
 
     if (error) throw error;
-    return data || { output_count: 0, paid_credits: 0 };
+
+    return data || {
+      output_count: 0,
+      paid_credits: 0
+    };
+
   } catch (e) {
-    console.warn("[supabase] getUsageRow failed, bypassing credit check:", e?.message || e);
-    return { output_count: 0, paid_credits: 0 };
+    console.error(
+      "[supabase] getUsageRow failed:",
+      e?.message || e
+    );
+
+    throw Object.assign(
+      new Error("Usage lookup unavailable"),
+      { status: 503 }
+    );
   }
 }
 
-async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
-  if (!hasSupabase || !scoped_user_id) return;
+async function setUsageRow(
+  scoped_user_id,
+  { output_count, paid_credits }
+) {
+  if (!hasSupabase || !scoped_user_id) {
+    throw Object.assign(
+      new Error(
+        "Usage service unavailable or user_id missing"
+      ),
+      { status: 503 }
+    );
+  }
 
   try {
     const { error } = await supabase
@@ -109,20 +177,39 @@ async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
       });
 
     if (error) throw error;
+
   } catch (e) {
-    console.warn("[supabase] setUsageRow failed:", e?.message || e);
+    console.error(
+      "[supabase] setUsageRow failed:",
+      e?.message || e
+    );
+
+    throw Object.assign(
+      new Error("Usage update unavailable"),
+      { status: 503 }
+    );
   }
 }
 
-async function checkCredit(scoped_user_id, plan_type = "") {
+async function checkCredit(
+  scoped_user_id,
+  plan_type = "",
+  mode = "manzai"
+) {
   if (!hasSupabase || !scoped_user_id) {
-    return { ok: true, row: null };
+    throw Object.assign(
+      new Error(
+        "Usage service unavailable or user_id missing"
+      ),
+      { status: 503 }
+    );
   }
 
   const row = await getUsageRow(scoped_user_id);
+
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
-  const quota = resolveQuotaByPlan(plan_type);
+  const quota = resolveQuotaByPlan(plan_type, mode);
 
   return {
     ok: used < quota || paid > 0,
@@ -130,25 +217,38 @@ async function checkCredit(scoped_user_id, plan_type = "") {
   };
 }
 
-async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
+async function consumeAfterSuccess(
+  scoped_user_id,
+  plan_type = "",
+  mode = "manzai"
+) {
   if (!hasSupabase || !scoped_user_id) {
-    return { consumed: null, output_count: 0, paid_credits: 0 };
+    throw Object.assign(
+      new Error(
+        "Usage service unavailable or user_id missing"
+      ),
+      { status: 503 }
+    );
   }
 
   try {
     const row = await getUsageRow(scoped_user_id);
+
     const used = row.output_count ?? 0;
     const paid = row.paid_credits ?? 0;
     const nextUsed = used + 1;
 
-    const isIosUnlimitedPlan = plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited";
-    const quota = resolveQuotaByPlan(plan_type);
+    const quota = resolveQuotaByPlan(
+      plan_type,
+      mode
+    );
 
     if (paid >= UNLIMITED_FLAG_VALUE) {
       await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: paid
       });
+
       return {
         consumed: "unlimited",
         output_count: nextUsed,
@@ -161,6 +261,7 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
         output_count: nextUsed,
         paid_credits: paid
       });
+
       return {
         consumed: "free",
         output_count: nextUsed,
@@ -170,10 +271,12 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
 
     if (paid > 0) {
       const nextPaid = paid - 1;
+
       await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: nextPaid
       });
+
       return {
         consumed: "paid",
         output_count: nextUsed,
@@ -186,46 +289,18 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
       output_count: used,
       paid_credits: paid
     };
+
   } catch (e) {
-    console.warn("[supabase] consumeAfterSuccess failed, credits NOT decremented:", e?.message || e);
-    return {
-      consumed: null,
-      output_count: 0,
-      paid_credits: 0,
-      error: e?.message || String(e)
-    };
+    console.warn(
+      "[supabase] consumeAfterSuccess failed, credits NOT decremented:",
+      e?.message || e
+    );
+
+    throw Object.assign(
+      new Error("Usage consumption unavailable"),
+      { status: 503 }
+    );
   }
-}
-
-const PRODUCT_CREDIT_100 = "credit_100";
-const PRODUCT_UNLIMITED = "unlimited_unlock";
-const CREDIT_100_AMOUNT = 100;
-
-async function addCreditsForPurchase(scoped_user_id, product_id) {
-  if (!scoped_user_id) {
-    throw new Error("user_id missing");
-  }
-
-  const row = await getUsageRow(scoped_user_id);
-  const paid = row.paid_credits ?? 0;
-  let nextPaid = paid;
-
-  if (product_id === PRODUCT_CREDIT_100) {
-    nextPaid = paid + CREDIT_100_AMOUNT;
-  } else if (product_id === PRODUCT_UNLIMITED) {
-    nextPaid = UNLIMITED_FLAG_VALUE;
-  } else {
-    const err = new Error("Unsupported product_id");
-    err.status = 400;
-    throw err;
-  }
-
-  await setUsageRow(scoped_user_id, {
-    output_count: row.output_count ?? 0,
-    paid_credits: nextPaid
-  });
-
-  return nextPaid;
 }
 
 /* =========================
@@ -233,32 +308,64 @@ async function addCreditsForPurchase(scoped_user_id, product_id) {
  * ========================= */
 
 const MANZAI_BOKE_DEFS = {
-  IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
-  HIYU: "比喩ボケ：比喩で誇張してのボケ。",
-  GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
-  GIJI_RONRI: "擬似論理ボケ：論理風だが中身がズレているボケ。",
-  TSUKKOMI_BOKE: "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
-  RENSA: "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
-  KOTOBA_ASOBI: "言葉遊び：ダジャレ・韻などで言語的にふざける。"
+  IIMACHIGAI:
+    "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
+
+  HIYU:
+    "比喩ボケ：比喩で誇張してのボケ。",
+
+  GYAKUSETSU:
+    "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
+
+  GIJI_RONRI:
+    "擬似論理ボケ：論理風だが中身がズレているボケ。",
+
+  TSUKKOMI_BOKE:
+    "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
+
+  RENSA:
+    "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
+
+  KOTOBA_ASOBI:
+    "言葉遊び：ダジャレ・韻などで言語的にふざける。"
 };
 
 const MANZAI_TSUKKOMI_DEFS = {
-  ODOROKI_GIMON: "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
-  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
-  OKORI: "怒りツッコミ：怒ったような言い方でのツッコミ。",
-  KYOKAN: "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
-  META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
+  ODOROKI_GIMON:
+    "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
+
+  AKIRE_REISEI:
+    "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
+
+  OKORI:
+    "怒りツッコミ：怒ったような言い方でのツッコミ。",
+
+  KYOKAN:
+    "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
+
+  META:
+    "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
 };
 
 const MANZAI_GENERAL_DEFS = {
-  SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
-  GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
-  TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
-  KANCHIGAI_TEISEI: "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
-  SURECHIGAI: "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
-  TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。"
-};
+  SANDAN_OCHI:
+    "三段オチ：1・2をフリ、3で意外なオチ。",
 
+  GYAKUHARI:
+    "逆張り構成：期待・常識を外して予想を逆手に取る。",
+
+  TENKAI_HAKAI:
+    "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
+
+  KANCHIGAI_TEISEI:
+    "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
+
+  SURECHIGAI:
+    "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
+
+  TACHIBA_GYAKUTEN:
+    "立場逆転：途中または終盤で役割・地位がひっくり返る。"
+};
 /* =========================
  * コント専用の技法定義
  * ========================= */
@@ -448,7 +555,7 @@ function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
   const alreadyHasNaturalEnding = /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
   if (alreadyHasNaturalEnding) {
     return t;
-  }
+    }
 
   return t ? `${t}\n\n${outro}` : outro;
 }
@@ -658,7 +765,7 @@ function ensureSingleTitle(titleIn, bodyIn) {
 }
 
 /* =========================
- * ガイドライン・プロンプト作成（漫才・コント両対応）
+* ガイドライン・プロンプト作成（漫才・コント両対応）
  * ========================= */
 
 function parseCharacterNames(charDesc) {
@@ -877,8 +984,7 @@ function buildPromptByMode({
       "- 漫才ではないため、冒頭の「どうもー！」や最後の「もういいよ！」「ありがとうございました」は絶対に入れないでください。",
       "- 最後はコントらしい鮮やかで面白いオチのセリフ（暗転のキッカケになる一言）でピタッと終える。"
     ].join("\n");
-
-    return {
+return {
       systemPrompt,
       prompt,
       techniquesForMeta,
@@ -1079,10 +1185,8 @@ export default async function handler(req, res) {
 
     // 1. 購入クレジット追加 / 買い切りアンロック
     if (action === "add_credits" || action === "add_credit") {
-      const product_id = String(body.product_id || "").trim();
-      if (!scopedUserId || !product_id) return res.status(400).json({ error: "user_id and product_id are required" });
-      const paidCredits = await addCreditsForPurchase(scopedUserId, product_id);
-      return res.status(200).json({ ok: true, mode, user_id: rawUserId, scoped_user_id: scopedUserId, product_id, paid_credits: paidCredits });
+      // 購入情報は /api/iap/verify で Apple の署名検証後にのみ付与する。
+      return res.status(403).json({ error: "Purchase verification required" });
     }
 
     // 2. クレジット残高照会
@@ -1095,7 +1199,7 @@ export default async function handler(req, res) {
         output_count: row.output_count ?? 0,
         usage_count: row.output_count ?? 0,
         paid_credits: row.paid_credits ?? 0
-      });
+        });
     }
 
     // ★ 3. AIによる「おまかせ設定」（漫才モードとコントモードの両方に完全対応！クレジット消費なし）
@@ -1239,7 +1343,7 @@ export default async function handler(req, res) {
           : []
     };
 
-    const credit = await checkCredit(scopedUserId, plan_type);
+    const credit = await checkCredit(scopedUserId, plan_type, mode);
     if (!credit.ok) {
       return res.status(402).json({
         error: "クレジットが不足しています。",
@@ -1306,7 +1410,7 @@ export default async function handler(req, res) {
       bodyText = ensureManzaiTsukkomiOutro(bodyText, tsukkomiName);
     }
 
-    const consumption = await consumeAfterSuccess(scopedUserId, plan_type);
+    const consumption = await consumeAfterSuccess(scopedUserId, plan_type, mode);
 
     const fullSettingInfo = [
       safeTheme,
