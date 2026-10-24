@@ -3,6 +3,7 @@ export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import { verifyManzaiAssertion } from "../lib/appAttestVerify.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -69,11 +70,12 @@ const FREE_QUOTA_IOS_NEW = 3;
 const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
 
-function resolveQuotaByPlan(plan_type = "", mode = "manzai") {
-  // 安全優先：公開APIのplan_typeは端末側で偽装できるため、
-  // 漫才生成は一律3回に制限する。Androidの既存枠との分離には
-  // 別途、サーバー検証可能なアプリ識別が必要。
-  if (mode === "manzai") return FREE_QUOTA_IOS_NEW;
+function resolveQuotaByPlan(plan_type = "", mode = "manzai", verifiedIOS = false) {
+  // App Attest 検証済みの iPhone 漫才メーカーは無料3回。
+  if (mode === "manzai" && verifiedIOS) return FREE_QUOTA_IOS_NEW;
+  // 暫定互換性: 検証なしの漫才は従来の500回枠。
+  // これはAndroidの真正性を証明しないため、本番用の安全な分離ではない。
+  if (mode === "manzai") return FREE_QUOTA_DEFAULT;
   if (plan_type === "conte_ios_unlimited") return FREE_QUOTA_IOS_NEW;
   if (plan_type === "conte_android_free_10") return FREE_QUOTA_ANDROID_AD;
   return FREE_QUOTA_DEFAULT;
@@ -121,7 +123,7 @@ async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
   }
 }
 
-async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai") {
+async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai", verifiedIOS = false) {
   if (!hasSupabase || !scoped_user_id) {
     throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
   }
@@ -129,7 +131,7 @@ async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai") {
   const row = await getUsageRow(scoped_user_id);
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
-  const quota = resolveQuotaByPlan(plan_type, mode);
+  const quota = resolveQuotaByPlan(plan_type, mode, verifiedIOS);
 
   return {
     ok: used < quota || paid > 0,
@@ -137,12 +139,12 @@ async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai") {
   };
 }
 
-async function consumeAfterSuccess(scoped_user_id, plan_type = "", mode = "manzai") {
+async function consumeAfterSuccess(scoped_user_id, plan_type = "", mode = "manzai", verifiedIOS = false) {
   if (!hasSupabase || !scoped_user_id) {
     throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
   }
 
-  const quota = resolveQuotaByPlan(plan_type, mode);
+  const quota = resolveQuotaByPlan(plan_type, mode, verifiedIOS);
   try {
     const { data, error } = await supabase.rpc("consume_generation_credit", {
       p_user_id: scoped_user_id,
@@ -188,6 +190,7 @@ const MANZAI_TSUKKOMI_DEFS = {
   KYOKAN: "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
   META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
 };
+
 const MANZAI_GENERAL_DEFS = {
   SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
   GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
@@ -376,6 +379,7 @@ function detectTsukkomiSpeakerFromScript(text, fallbackName = "B") {
   }
   return speakers.length >= 2 ? speakers[1] : fallbackName;
 }
+
 function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
   const actualTsukkomi = detectTsukkomiSpeakerFromScript(text, defaultTsukkomiName);
   const outro = `${actualTsukkomi}: [叩く] もういいよ！`;
@@ -564,9 +568,9 @@ function ensureSingleTitle(titleIn, bodyIn) {
       title = normalizeTitleString(first);
       lines.shift();
       while (lines.length && lines[0].trim() === "") {
-        lines.shift();
+lines.shift();
       }
- }
+    }
   }
 
   if (title && lines.length) {
@@ -763,10 +767,9 @@ function buildPromptByMode({
       "【動物の姿（役名が動物の場合のみ選択）】ANIMAL_DOG (犬・柴犬・狼) / ANIMAL_CAT (猫・虎・ライオン) / ANIMAL_PANDA (パンダ) / ANIMAL_GORILLA (ゴリラ・猿・チンパンジー) / ANIMAL_BEAR (クマ・ヒグマ) / ANIMAL_RABBIT (ウサギ) / ANIMAL_BIRD_PENGUIN (ペンギン・鳥) / ANIMAL_OCTOPUS (タコ・イカ) / ANIMAL_ALIEN (宇宙人)",
       "【物の姿（役名が物の場合のみ選択）】OBJECT_FRIDGE (冷蔵庫・家電) / OBJECT_SMARTPHONE (スマホ・PC) / OBJECT_APPLE (りんご・果物) / OBJECT_ONIGIRI (おにぎり・寿司・食パン) / OBJECT_TRAFFIC_LIGHT (信号機) / OBJECT_SWORD (聖剣・メス・文房具) / OBJECT_TOILET (トイレ・便器) / OBJECT_ROBOT (AIロボット・メカ)"
     ].join("\n");
-
-    const prompt = [
+const prompt = [
       "以下の条件で、日本語のコント（寸劇）台本を1本作成してください。",
-"",
+      "",
       `【シチュエーション・舞台設定】${safeTheme}`,
       `【ジャンル・作風】${safeGenre}`,
       `【登場人物・配役】${charDesc || `${bokeName}（ボケ役）、${tsukkomiName}（ツッコミ役）`}`,
@@ -964,9 +967,9 @@ const client = {
         const text = extractTextFromResponse(response);
 
         if (!text) {
-          console.warn(
+console.warn(
             "[openai] response text was empty. status:",
- response?.status,
+            response?.status,
             "incomplete_details:",
             response?.incomplete_details
           );
@@ -1143,10 +1146,17 @@ export default async function handler(req, res) {
         });
       }
     }
-
     // 4. 通常生成（漫才 または コント）
     if (action !== "generate") {
-return res.status(400).json({ error: "Unknown action" });
+      return res.status(400).json({ error: "Unknown action" });
+    }
+
+    // Assertion がある漫才生成は必ずサーバーで検証する。
+    // 注: Assertion を付けないリクエストも互換性のため受理する暫定構成。
+    let verifiedIOS = false;
+    if (mode === "manzai" && body.app_attest) {
+      const attestationResult = await verifyManzaiAssertion(body, body.app_attest);
+      verifiedIOS = attestationResult?.verified === true;
     }
 
     const plan_type = String(body.plan_type || "").trim();
@@ -1174,7 +1184,7 @@ return res.status(400).json({ error: "Unknown action" });
           : []
     };
 
-    const credit = await checkCredit(scopedUserId, plan_type, mode);
+    const credit = await checkCredit(scopedUserId, plan_type, mode, verifiedIOS);
     if (!credit.ok) {
       return res.status(402).json({
         error: "クレジットが不足しています。",
@@ -1241,7 +1251,7 @@ return res.status(400).json({ error: "Unknown action" });
       bodyText = ensureManzaiTsukkomiOutro(bodyText, tsukkomiName);
     }
 
-    const consumption = await consumeAfterSuccess(scopedUserId, plan_type, mode);
+    const consumption = await consumeAfterSuccess(scopedUserId, plan_type, mode, verifiedIOS);
 
     const fullSettingInfo = [
       safeTheme,
