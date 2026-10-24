@@ -1,8 +1,8 @@
 
-// POST /api/iap/verify
-// StoreKit 2 の署名付き購入情報をAppleの証明書で検証する。
-// Appleの署名検証失敗時はVercel Logsに詳細を記録する。
-// 注意：user_idは認証済みアカウントではなく従来の端末識別子。
+ // POST /api/iap/verify
+ // StoreKit 2 の署名付き購入情報を検証する。
+ // 漫才メーカーとコントメーカーの購入権を分離する。
+ // 既存のコントメーカーの user_id 形式は維持する。
 
 export const config = { runtime: "nodejs" };
 
@@ -14,13 +14,12 @@ import {
 import { X509Certificate } from "node:crypto";
 
 const PRODUCT = "unlimited_unlock";
-const UNLIMITED = 999999;
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// Appleのルート証明書と環境変数から署名検証器を作成する。
-function createVerifier(environment) {
+// Appleルート証明書を取得
+function getAppleRoots() {
   const base64 = process.env.APPLE_ROOT_CERTS_BASE64 || "";
 
   const roots = base64
@@ -29,22 +28,77 @@ function createVerifier(environment) {
     .filter(Boolean)
     .map(s => {
       const raw = Buffer.from(s, "base64");
-
-      // 証明書の形式が不正な場合はエラーにする。
       new X509Certificate(raw);
-
       return raw;
     });
 
-  const bundle = process.env.APPLE_BUNDLE_ID || "";
-  const appId = Number(process.env.APPLE_APP_ID);
+  if (!roots.length) {
+    throw new Error("Apple root certificates are missing");
+  }
 
+  return roots;
+}
+
+// アプリごとのBundle IDを設定
+function getAppConfigs() {
+  const configs = [];
+
+  const manzaiBundle =
+    process.env.APPLE_MANZAI_BUNDLE_ID || "";
+
+  const manzaiAppId =
+    Number(process.env.APPLE_MANZAI_APP_ID);
+
+  if (manzaiBundle) {
+    configs.push({
+      mode: "manzai",
+      bundleId: manzaiBundle,
+      appId: manzaiAppId
+    });
+  }
+
+  // 旧環境変数をコントメーカー用として維持
+  const conteBundle =
+    process.env.APPLE_CONTE_BUNDLE_ID ||
+    process.env.APPLE_BUNDLE_ID ||
+    "";
+
+  const conteAppId = Number(
+    process.env.APPLE_CONTE_APP_ID ||
+    process.env.APPLE_APP_ID
+  );
+
+  if (conteBundle) {
+    configs.push({
+      mode: "conte",
+      bundleId: conteBundle,
+      appId: conteAppId
+    });
+  }
+
+  if (!configs.length) {
+    throw new Error("Apple app configuration is missing");
+  }
+
+  // 同じBundle IDを2アプリとして登録させない
+  const bundleIds = configs.map(c => c.bundleId);
+
+  if (new Set(bundleIds).size !== bundleIds.length) {
+    throw new Error("Duplicate Apple bundle configuration");
+  }
+
+  return configs;
+}
+
+function createVerifier(environment, app, roots) {
   if (
-    !roots.length ||
-    !bundle ||
+    !app.bundleId ||
     (
       environment === Environment.PRODUCTION &&
-      (!Number.isSafeInteger(appId) || appId <= 0)
+      (
+        !Number.isSafeInteger(app.appId) ||
+        app.appId <= 0
+      )
     )
   ) {
     throw new Error(
@@ -56,16 +110,14 @@ function createVerifier(environment) {
     roots,
     true,
     environment,
-    bundle,
+    app.bundleId,
     environment === Environment.PRODUCTION
-      ? appId
+      ? app.appId
       : undefined
   );
 }
 
 export default async function handler(req, res) {
-
-  // POSTのみ許可
   if (req.method !== "POST") {
     return res.status(405).json({
       error: "Method Not Allowed"
@@ -78,7 +130,7 @@ export default async function handler(req, res) {
     app_account_token
   } = req.body || {};
 
-  // リクエスト形式の検証
+  // 入力チェック
   if (
     typeof signed_transaction !== "string" ||
     signed_transaction.length > 30000 ||
@@ -93,7 +145,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // Supabase接続設定を確認
   if (
     !process.env.SUPABASE_URL ||
     !process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -103,60 +154,71 @@ export default async function handler(req, res) {
     });
   }
 
-  let decoded;
+  let decoded = null;
+  let verifiedApp = null;
+  let verifiedEnvironment = null;
 
   try {
+    const roots = getAppleRoots();
+    const apps = getAppConfigs();
 
-    // Appleによる署名検証。
-    // クライアントが申告した環境を信用せず、
-    // ProductionとSandboxの両方で検証する。
-    const environments = [
-      Environment.PRODUCTION,
-      Environment.SANDBOX
-    ];
+    // 署名済みの購入情報を各アプリ・環境で検証。
+    // 申告されたアプリ種別は信用しない。
+    for (const app of apps) {
+      if (decoded) break;
 
-    for (const env of environments) {
-      try {
+      for (const env of [
+        Environment.PRODUCTION,
+        Environment.SANDBOX
+      ]) {
+        try {
+          const verifier = createVerifier(
+            env,
+            app,
+            roots
+          );
 
-        const payload = await createVerifier(env)
-          .verifyAndDecodeTransaction(signed_transaction);
+          const payload =
+            await verifier.verifyAndDecodeTransaction(
+              signed_transaction
+            );
 
-        decoded = payload;
+          decoded = payload;
+          verifiedApp = app;
+          verifiedEnvironment = env;
 
-        // 検証成功をログに出す
-        console.info(
-          "[IAP] Apple signature verification succeeded",
-          { environment: env }
-        );
+          console.info(
+            "[IAP] Apple signature verification succeeded",
+            {
+              mode: app.mode,
+              environment: env
+            }
+          );
 
-        break;
-
-      } catch (err) {
-
-        // ★今回追加した診断処理
-        // 秘密鍵・購入情報そのものはログに出さない。
-        console.error(
-          "[IAP] Apple signature verification failed",
-          {
-            environment: env,
-            name: err?.name || "Error",
-            message: err?.message || String(err),
-            code: err?.code ?? null,
-            status: err?.status ?? null
-          }
-        );
-
+          break;
+        } catch (err) {
+          console.warn(
+            "[IAP] Apple signature verification failed",
+            {
+              mode: app.mode,
+              environment: env,
+              name: err?.name || "Error",
+              message: err?.message || String(err),
+              code: err?.code ?? null,
+              status: err?.status ?? null
+            }
+          );
+        }
       }
     }
 
-    // どちらの環境でも検証できなかった場合
-    if (!decoded) {
+    if (!decoded || !verifiedApp) {
       return res.status(422).json({
         error: "Apple signature verification failed"
       });
     }
 
-    // 商品ID・購入種類・購入者トークンなどを照合する。
+    // Apple署名付きペイロードの属性を検証
     if (
       decoded.productId !== PRODUCT ||
       decoded.type !== "Non-Consumable" ||
@@ -164,10 +226,10 @@ export default async function handler(req, res) {
         app_account_token.toLowerCase() ||
       decoded.revocationDate != null ||
       !decoded.transactionId ||
-      decoded.bundleId !== process.env.APPLE_BUNDLE_ID ||
+      decoded.bundleId !== verifiedApp.bundleId ||
       (
         decoded.quantity != null &&
-        decoded.quantity !== 1
+        Number(decoded.quantity) !== 1
       )
     ) {
       return res.status(422).json({
@@ -175,12 +237,27 @@ export default async function handler(req, res) {
       });
     }
 
-    // 既存のユーザー識別子形式を維持
-    const scopedId = user_id.startsWith("conte_")
-      ? user_id
-      : `conte_${user_id}`;
+    // 署名検証に成功したアプリに基づいてIDを分離
+    const rawId = user_id.trim();
 
-    // Supabaseに接続
+    if (
+      verifiedApp.mode === "manzai" &&
+      rawId.startsWith("conte_")
+    ) {
+      return res.status(400).json({
+        error: "Invalid manzai user ID"
+      });
+    }
+
+    const scopedId =
+      verifiedApp.mode === "conte"
+        ? (
+            rawId.startsWith("conte_")
+              ? rawId
+              : `conte_${rawId}`
+          )
+        : rawId;
+
     const supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -192,8 +269,7 @@ export default async function handler(req, res) {
       }
     );
 
-    // 検証済みの購入情報を記録し、
-    // コントの無制限生成を有効化する。
+    // 検証済み取引のみDBに適用
     const { data, error } = await supabase.rpc(
       "apply_verified_apple_unlock",
       {
@@ -202,15 +278,12 @@ export default async function handler(req, res) {
         p_product_id: PRODUCT,
         p_app_account_token:
           String(decoded.appAccountToken).toLowerCase(),
-        p_environment: String(decoded.environment || "")
+        p_environment: String(verifiedEnvironment)
       }
     );
 
     if (error) {
-      console.error(
-        "purchase credit rpc failed",
-        error
-      );
+      console.error("[IAP] purchase RPC failed", error);
 
       return res.status(503).json({
         error: "Credit delivery temporarily unavailable"
@@ -223,30 +296,36 @@ export default async function handler(req, res) {
 
     if (result?.status === "conflict") {
       return res.status(409).json({
-        error:
-          "Transaction already belongs to another account"
+        error: "Transaction already belongs to another account"
       });
     }
 
-    // 購入検証・権限反映が正常に完了
+    if (
+      result?.status !== "credited" &&
+      result?.status !== "duplicate"
+    ) {
+      return res.status(503).json({
+        error: "Unexpected purchase delivery result"
+      });
+    }
+
     return res.status(200).json({
       ok: true,
-      granted: result?.status === "credited",
-      already_processed: result?.status === "duplicate",
-      paid_credits: result?.paid_credits,
+      mode: verifiedApp.mode,
+      granted: result.status === "credited",
+      already_processed: result.status === "duplicate",
+      paid_credits: result.paid_credits,
       unlimited: true
     });
 
   } catch (err) {
-
-    console.error(
-      "iap verification failed",
-      err
-    );
+    console.error("[IAP] verification unavailable", {
+      name: err?.name || "Error",
+      message: err?.message || String(err)
+    });
 
     return res.status(503).json({
       error: "Purchase verification unavailable"
     });
-
   }
 }
