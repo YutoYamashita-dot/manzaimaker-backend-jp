@@ -144,7 +144,7 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "") {
     const isIosUnlimitedPlan = plan_type === "ios_unlimited" || plan_type === "conte_ios_unlimited";
     const quota = resolveQuotaByPlan(plan_type);
 
-    if ((isIosUnlimitedPlan && paid > 0) || paid >= UNLIMITED_FLAG_VALUE) {
+    if (paid >= UNLIMITED_FLAG_VALUE) {
       await setUsageRow(scoped_user_id, {
         output_count: nextUsed,
         paid_credits: paid
@@ -954,24 +954,9 @@ export default async function handler(req, res) {
     // 1. 購入クレジット追加 / 買い切りアンロック
     if (action === "add_credits" || action === "add_credit") {
       const product_id = String(body.product_id || "").trim();
-
-      if (!scopedUserId) {
-        return res.status(400).json({ error: "user_id is required" });
-      }
-      if (!product_id) {
-        return res.status(400).json({ error: "product_id is required" });
-      }
-
+      if (!scopedUserId || !product_id) return res.status(400).json({ error: "user_id and product_id are required" });
       const paidCredits = await addCreditsForPurchase(scopedUserId, product_id);
-
-      return res.status(200).json({
-        ok: true,
-        mode,
-        user_id: rawUserId,
-        scoped_user_id: scopedUserId,
-        product_id,
-        paid_credits: paidCredits
-      });
+      return res.status(200).json({ ok: true, mode, user_id: rawUserId, scoped_user_id: scopedUserId, product_id, paid_credits: paidCredits });
     }
 
     // 2. クレジット残高照会
