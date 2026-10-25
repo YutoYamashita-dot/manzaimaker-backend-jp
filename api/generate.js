@@ -1,4 +1,6 @@
-// api/generate.js
+
+
+ // api/generate.js
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -18,11 +20,22 @@ const supabase = hasSupabase
  * ========================= */
 
 function detectAppMode(body = {}) {
-  const explicitMode = String(body.mode || body.app_mode || body.type || "").trim().toLowerCase();
-  if (explicitMode === "conte" || explicitMode === "skit" || explicitMode === "コント") {
+  const explicitMode = String(
+    body.mode || body.app_mode || body.type || ""
+  ).trim().toLowerCase();
+
+  if (
+    explicitMode === "conte" ||
+    explicitMode === "skit" ||
+    explicitMode === "コント"
+  ) {
     return "conte";
   }
-  if (explicitMode === "manzai" || explicitMode === "漫才") {
+
+  if (
+    explicitMode === "manzai" ||
+    explicitMode === "漫才"
+  ) {
     return "manzai";
   }
 
@@ -45,7 +58,9 @@ function detectAppMode(body = {}) {
     ...(Array.isArray(body.general) ? body.general : [])
   ].join(" ");
 
-  if (/(キャラ憑依|状況ズレ|マイム|サイコパス|キレ芸|ノリツッコミ|伏線回収オチ|すれ違いコント)/.test(allTechs)) {
+  if (
+    /(キャラ憑依|状況ズレ|マイム|サイコパス|キレ芸|ノリツッコミ|伏線回収オチ|すれ違いコント)/.test(allTechs)
+  ) {
     return "conte";
   }
 
@@ -55,9 +70,13 @@ function detectAppMode(body = {}) {
 function resolveScopedUserId(rawUserId, mode) {
   const id = String(rawUserId || "").trim();
   if (!id) return "";
+
   if (mode === "conte") {
-    return id.startsWith("conte_") ? id : `conte_${id}`;
+    return id.startsWith("conte_")
+      ? id
+      : `conte_${id}`;
   }
+
   return id;
 }
 
@@ -70,17 +89,36 @@ const FREE_QUOTA_IOS_NEW = 3;
 const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
 
-function resolveQuotaByPlan(plan_type = "", mode = "manzai", verifiedIOS = false) {
-  if (mode === "manzai" && verifiedIOS) return FREE_QUOTA_IOS_NEW;
-  if (mode === "manzai") return FREE_QUOTA_DEFAULT;
-  if (plan_type === "conte_ios_unlimited") return FREE_QUOTA_IOS_NEW;
-  if (plan_type === "conte_android_free_10") return FREE_QUOTA_ANDROID_AD;
+function resolveQuotaByPlan(
+  plan_type = "",
+  mode = "manzai",
+  verifiedIOS = false
+) {
+  if (mode === "manzai" && verifiedIOS) {
+    return FREE_QUOTA_IOS_NEW;
+  }
+
+  if (mode === "manzai") {
+    return FREE_QUOTA_DEFAULT;
+  }
+
+  if (plan_type === "conte_ios_unlimited") {
+    return FREE_QUOTA_IOS_NEW;
+  }
+
+  if (plan_type === "conte_android_free_10") {
+    return FREE_QUOTA_ANDROID_AD;
+  }
+
   return FREE_QUOTA_DEFAULT;
 }
 
 async function getUsageRow(scoped_user_id) {
   if (!hasSupabase || !scoped_user_id) {
-    throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
+    throw Object.assign(
+      new Error("Usage service unavailable or user_id missing"),
+      { status: 503 }
+    );
   }
 
   try {
@@ -91,16 +129,33 @@ async function getUsageRow(scoped_user_id) {
       .maybeSingle();
 
     if (error) throw error;
-    return data || { output_count: 0, paid_credits: 0 };
+
+    return data || {
+      output_count: 0,
+      paid_credits: 0
+    };
   } catch (e) {
-    console.error("[supabase] getUsageRow failed:", e?.message || e);
-    throw Object.assign(new Error("Usage lookup unavailable"), { status: 503 });
+    console.error(
+      "[supabase] getUsageRow failed:",
+      e?.message || e
+    );
+
+    throw Object.assign(
+      new Error("Usage lookup unavailable"),
+      { status: 503 }
+    );
   }
 }
 
-async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
+async function setUsageRow(
+  scoped_user_id,
+  { output_count, paid_credits }
+) {
   if (!hasSupabase || !scoped_user_id) {
-    throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
+    throw Object.assign(
+      new Error("Usage service unavailable or user_id missing"),
+      { status: 503 }
+    );
   }
 
   try {
@@ -115,20 +170,41 @@ async function setUsageRow(scoped_user_id, { output_count, paid_credits }) {
 
     if (error) throw error;
   } catch (e) {
-    console.error("[supabase] setUsageRow failed:", e?.message || e);
-    throw Object.assign(new Error("Usage update unavailable"), { status: 503 });
+    console.error(
+      "[supabase] setUsageRow failed:",
+      e?.message || e
+    );
+
+    throw Object.assign(
+      new Error("Usage update unavailable"),
+      { status: 503 }
+    );
   }
 }
 
-async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai", verifiedIOS = false) {
+async function checkCredit(
+  scoped_user_id,
+  plan_type = "",
+  mode = "manzai",
+  verifiedIOS = false
+) {
   if (!hasSupabase || !scoped_user_id) {
-    throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
+    throw Object.assign(
+      new Error("Usage service unavailable or user_id missing"),
+      { status: 503 }
+    );
   }
 
   const row = await getUsageRow(scoped_user_id);
+
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
-  const quota = resolveQuotaByPlan(plan_type, mode, verifiedIOS);
+
+  const quota = resolveQuotaByPlan(
+    plan_type,
+    mode,
+    verifiedIOS
+  );
 
   return {
     ok: used < quota || paid > 0,
@@ -136,33 +212,63 @@ async function checkCredit(scoped_user_id, plan_type = "", mode = "manzai", veri
   };
 }
 
-async function consumeAfterSuccess(scoped_user_id, plan_type = "", mode = "manzai", verifiedIOS = false) {
+async function consumeAfterSuccess(
+  scoped_user_id,
+  plan_type = "",
+  mode = "manzai",
+  verifiedIOS = false
+) {
   if (!hasSupabase || !scoped_user_id) {
-    throw Object.assign(new Error("Usage service unavailable or user_id missing"), { status: 503 });
+    throw Object.assign(
+      new Error("Usage service unavailable or user_id missing"),
+      { status: 503 }
+    );
   }
 
-  const quota = resolveQuotaByPlan(plan_type, mode, verifiedIOS);
+  const quota = resolveQuotaByPlan(
+    plan_type,
+    mode,
+    verifiedIOS
+  );
+
   try {
-    const { data, error } = await supabase.rpc("consume_generation_credit", {
-      p_user_id: scoped_user_id,
-      p_free_quota: quota
-    });
+    const { data, error } = await supabase.rpc(
+      "consume_generation_credit",
+      {
+        p_user_id: scoped_user_id,
+        p_free_quota: quota
+      }
+    );
+
     if (error) throw error;
+
     if (!data || data.ok !== true) {
-      throw Object.assign(new Error("INSUFFICIENT_CREDITS"), {
-        status: 402,
-        code: "INSUFFICIENT_CREDITS"
-      });
+      throw Object.assign(
+        new Error("INSUFFICIENT_CREDITS"),
+        {
+          status: 402,
+          code: "INSUFFICIENT_CREDITS"
+        }
+      );
     }
+
     return {
       consumed: data.consumed,
       output_count: data.output_count,
       paid_credits: data.paid_credits
     };
   } catch (e) {
-    console.error("[supabase] consumeAfterSuccess failed:", e?.message || e);
+    console.error(
+      "[supabase] consumeAfterSuccess failed:",
+      e?.message || e
+    );
+
     if (e?.status === 402) throw e;
-    throw Object.assign(new Error("Usage consumption unavailable"), { status: 503 });
+
+    throw Object.assign(
+      new Error("Usage consumption unavailable"),
+      { status: 503 }
+    );
   }
 }
 
@@ -171,30 +277,48 @@ async function consumeAfterSuccess(scoped_user_id, plan_type = "", mode = "manza
  * ========================= */
 
 const MANZAI_BOKE_DEFS = {
-  IIMACHIGAI: "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
-  HIYU: "比喩ボケ：比喩で誇張してのボケ。",
-  GYAKUSETSU: "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
-  GIJI_RONRI: "擬似論理ボケ：論理風だが中身がズレているボケ。",
-  TSUKKOMI_BOKE: "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
-  RENSA: "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
-  KOTOBA_ASOBI: "言葉遊び：ダジャレ・韻などで言語的にふざける。"
+  IIMACHIGAI:
+    "言い間違い／聞き間違い：音韻のズレで意外性を生むボケ。",
+  HIYU:
+    "比喩ボケ：比喩で誇張してのボケ。",
+  GYAKUSETSU:
+    "逆説ボケ：一見正論に聞こえるが論理が破綻しているボケ。",
+  GIJI_RONRI:
+    "擬似論理ボケ：論理風だが中身がズレているボケ。",
+  TSUKKOMI_BOKE:
+    "ツッコミボケ：ツッコミの発言が次のボケの伏線になるボケ。",
+  RENSA:
+    "ボケの連鎖：ボケが次のボケを誘発するように連続させ、加速感を生むボケ。",
+  KOTOBA_ASOBI:
+    "言葉遊び：ダジャレ・韻などで言語的にふざける。"
 };
 
 const MANZAI_TSUKKOMI_DEFS = {
-  ODOROKI_GIMON: "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
-  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
-  OKORI: "怒りツッコミ：怒ったような言い方でのツッコミ。",
-  KYOKAN: "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
-  META: "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
+  ODOROKI_GIMON:
+    "驚き・疑問ツッコミ：観客の代弁として即時の驚き・疑問でのツッコミ。",
+  AKIRE_REISEI:
+    "呆れ・冷静ツッコミ：感情を抑えた冷静な態度でのツッコミ。",
+  OKORI:
+    "怒りツッコミ：怒ったような言い方でのツッコミ。",
+  KYOKAN:
+    "共感ツッコミ：相手の感情に一度共感してから、ツッコミをする。",
+  META:
+    "メタツッコミ：漫才の形式・構造そのものを指摘するツッコミ。"
 };
 
 const MANZAI_GENERAL_DEFS = {
-  SANDAN_OCHI: "三段オチ：1・2をフリ、3で意外なオチ。",
-  GYAKUHARI: "逆張り構成：期待・常識を外して予想を逆手に取る。",
-  TENKAI_HAKAI: "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
-  KANCHIGAI_TEISEI: "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
-  SURECHIGAI: "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
-  TACHIBA_GYAKUTEN: "立場逆転：途中または終盤で役割・地位がひっくり返る。"
+  SANDAN_OCHI:
+    "三段オチ：1・2をフリ、3で意外なオチ。",
+  GYAKUHARI:
+    "逆張り構成：期待・常識を外して予想を逆手に取る。",
+  TENKAI_HAKAI:
+    "展開破壊：築いた流れを意図的に壊し異質な要素を挿入。",
+  KANCHIGAI_TEISEI:
+    "勘違い→訂正：ボケの勘違いをツッコミが訂正する構成。",
+  SURECHIGAI:
+    "すれ違い：互いの前提が噛み合わずズレ続けて笑いを生む。",
+  TACHIBA_GYAKUTEN:
+    "立場逆転：途中または終盤で役割・地位がひっくり返る。"
 };
 
 /* =========================
@@ -202,30 +326,48 @@ const MANZAI_GENERAL_DEFS = {
  * ========================= */
 
 const CONTE_BOKE_DEFS = {
-  CHARA_HYOI: "キャラ憑依ボケ：強烈で独特なキャラクターになりきり、言動すべてで笑わせる。",
-  JOKYO_ZURE: "状況ズレボケ：その場のシチュエーションや空気と全く噛み合わない言動をとる。",
-  KODOGU_MIME: "小道具・マイムボケ：小道具や奇妙な動き・行動で視覚的・状況的にボケる。",
-  SENMON_RULE: "専門用語・独自ルール：謎の専門用語や自分だけのルールを当然のように押し通す。",
-  PSYCHOPATH: "狂気・サイコパス風：笑顔や冷静なトーンのまま、常識外れで少し怖いことをサラッと言う。",
-  TENDON: "天丼（繰り返しボケ）：同じボケやフレーズをタイミングを変えて繰り返し、笑いを増幅させる。",
-  BOYOMI: "棒読み・カタコト：感情がこもっていない不自然な話し方や挙動不審さで笑わせる。"
+  CHARA_HYOI:
+    "キャラ憑依ボケ：強烈で独特なキャラクターになりきり、言動すべてで笑わせる。",
+  JOKYO_ZURE:
+    "状況ズレボケ：その場のシチュエーションや空気と全く噛み合わない言動をとる。",
+  KODOGU_MIME:
+    "小道具・マイムボケ：小道具や奇妙な動き・行動で視覚的・状況的にボケる。",
+  SENMON_RULE:
+    "専門用語・独自ルール：謎の専門用語や自分だけのルールを当然のように押し通す。",
+  PSYCHOPATH:
+    "狂気・サイコパス風：笑顔や冷静なトーンのまま、常識外れで少し怖いことをサラッと言う。",
+  TENDON:
+    "天丼（繰り返しボケ）：同じボケやフレーズをタイミングを変えて繰り返し、笑いを増幅させる。",
+  BOYOMI:
+    "棒読み・カタコト：感情がこもっていない不自然な話し方や挙動不審さで笑わせる。"
 };
 
 const CONTE_TSUKKOMI_DEFS = {
-  KONWAKU: "困惑・戸惑いツッコミ：異常なボケに対して、一般人の視点からリアルに困惑して戸惑う。",
-  AKIRE_REISEI: "呆れ・冷静ツッコミ：感情を抑えた冷静なトーンで淡々と異常さを指摘する。",
-  KIREGEI: "キレ芸・絶叫ツッコミ：我慢の限界を超えて感情を爆発させ、勢いよくツッコむ。",
-  KOGOE_KOKORO: "小声・心の声ツッコミ：本人に聞こえないような小声や独り言で状況をツッコむ。",
-  NORI_TSUKKOMI: "ノリツッコミ：相手のボケの世界観に一度乗っかって演じてから、我に返ってツッコむ。"
+  KONWAKU:
+    "困惑・戸惑いツッコミ：異常なボケに対して、一般人の視点からリアルに困惑して戸惑う。",
+  AKIRE_REISEI:
+    "呆れ・冷静ツッコミ：感情を抑えた冷静なトーンで淡々と異常さを指摘する。",
+  KIREGEI:
+    "キレ芸・絶叫ツッコミ：我慢の限界を超えて感情を爆発させ、勢いよくツッコむ。",
+  KOGOE_KOKORO:
+    "小声・心の声ツッコミ：本人に聞こえないような小声や独り言で状況をツッコむ。",
+  NORI_TSUKKOMI:
+    "ノリツッコミ：相手のボケの世界観に一度乗っかって演じてから、我に返ってツッコむ。"
 };
 
 const CONTE_GENERAL_DEFS = {
-  TACHIBA_GYAKUTEN: "立場逆転：最初は優位だった側（店員と客、上司と部下など）の立場が後半で完全に逆転する。",
-  KINCHO_KANWA: "緊張と緩和：シリアスで緊迫した空気を作ってから、くだらない一言で一気に脱力させる。",
-  FUKUSEN_KAISHU: "伏線回収オチ：序盤にさりげなく出した言葉や設定が、最後のオチで鮮やかに回収される。",
-  ESCALATE: "エスカレート構成：最初は小さな違和感だったボケが、徐々に巨大・異常にエスカレートしていく。",
-  SURECHIGAI: "すれ違いコント：お互いが別のことを思い込んだまま会話が成立してしまい、ズレが膨らむ。",
-  TENKAI_HAKAI: "展開破壊（シュール）：これまでの設定や流れをぶち壊す不条理な展開に突入する。"
+  TACHIBA_GYAKUTEN:
+    "立場逆転：最初は優位だった側（店員と客、上司と部下など）の立場が後半で完全に逆転する。",
+  KINCHO_KANWA:
+    "緊張と緩和：シリアスで緊迫した空気を作ってから、くだらない一言で一気に脱力させる。",
+  FUKUSEN_KAISHU:
+    "伏線回収オチ：序盤にさりげなく出した言葉や設定が、最後のオチで鮮やかに回収される。",
+  ESCALATE:
+    "エスカレート構成：最初は小さな違和感だったボケが、徐々に巨大・異常にエスカレートしていく。",
+  SURECHIGAI:
+    "すれ違いコント：お互いが別のことを思い込んだまま会話が成立してしまい、ズレが膨らむ。",
+  TENKAI_HAKAI:
+    "展開破壊（シュール）：これまでの設定や流れをぶち壊す不条理な展開に突入する。"
 };
 
 const ALIAS_MAP = {
@@ -276,13 +418,25 @@ function resolveTechKey(item, table) {
   const s = String(item || "").trim();
   if (!s) return null;
   if (table[s]) return s;
-  if (ALIAS_MAP[s] && table[ALIAS_MAP[s]]) return ALIAS_MAP[s];
+
+  if (
+    ALIAS_MAP[s] &&
+    table[ALIAS_MAP[s]]
+  ) {
+    return ALIAS_MAP[s];
+  }
+
   for (const [k, def] of Object.entries(table)) {
     const label = def.split("：")[0].trim();
-    if (label === s || def.startsWith(s)) {
+
+    if (
+      label === s ||
+      def.startsWith(s)
+    ) {
       return k;
     }
   }
+
   return null;
 }
 
@@ -344,11 +498,14 @@ function inferRoleCostume(role) {
 
   let animalCandidate = "";
   let animalPosition = -1;
+
   for (const [keyword, code] of ROLE_ANIMAL_COSTUMES) {
     const pos = name.lastIndexOf(keyword);
     if (pos < 0) continue;
+
     const after = name.slice(pos + keyword.length);
     if (/^(好き|派|カフェ|の飼い主|を飼う|のファン|担当|係)/.test(after)) continue;
+
     if (pos >= animalPosition) {
       animalCandidate = code;
       animalPosition = pos;
@@ -357,70 +514,124 @@ function inferRoleCostume(role) {
 
   let humanCandidate = "";
   let humanPosition = -1;
+
   for (const [keyword, code] of ROLE_HUMAN_COSTUMES) {
     const pos = name.lastIndexOf(keyword);
     if (pos < 0) continue;
+
     const after = name.slice(pos + keyword.length);
-    // 「面接官を採点する応募者」のように目的語として前に出ている語よりも末尾の主語を優先
-    if (/^(を|に|と|より|から|の)/.test(after) && pos < name.length - keyword.length - 1) {
+
+    // 「面接官を採点する応募者」のように
+    // 目的語として前に出ている語よりも末尾の主語を優先
+    if (
+      /^(を|に|と|より|から|の)/.test(after) &&
+      pos < name.length - keyword.length - 1
+    ) {
       if (humanPosition < 0) {
         humanCandidate = code;
         humanPosition = pos;
       }
       continue;
     }
+
     if (pos >= humanPosition) {
       humanCandidate = code;
       humanPosition = pos;
     }
   }
 
-  const maxGenericHumanPos = Math.max(-1, ...HUMAN_ROLE_WORDS.map((w) => name.lastIndexOf(w)));
-  const finalHumanPos = Math.max(humanPosition, maxGenericHumanPos);
+  const maxGenericHumanPos = Math.max(
+    -1,
+    ...HUMAN_ROLE_WORDS.map((w) => name.lastIndexOf(w))
+  );
+
+  const finalHumanPos = Math.max(
+    humanPosition,
+    maxGenericHumanPos
+  );
 
   if (finalHumanPos > animalPosition) {
-    return { kind: "human", costume: humanCandidate || "CASUAL_PLAIN" };
+    return {
+      kind: "human",
+      costume: humanCandidate || "CASUAL_PLAIN"
+    };
   }
+
   if (animalCandidate) {
-    return { kind: "nonhuman", costume: animalCandidate };
+    return {
+      kind: "nonhuman",
+      costume: animalCandidate
+    };
   }
+
   if (finalHumanPos >= 0) {
-    return { kind: "human", costume: humanCandidate || "CASUAL_PLAIN" };
+    return {
+      kind: "human",
+      costume: humanCandidate || "CASUAL_PLAIN"
+    };
   }
-  return { kind: "unknown", costume: "" };
+
+  return {
+    kind: "unknown",
+    costume: ""
+  };
 }
 
 function reconcileRoleCostume(role, generatedCode) {
   const inferred = inferRoleCostume(role);
-  const aiCode = String(generatedCode || "").trim().toUpperCase();
+  const aiCode = String(generatedCode || "")
+    .trim()
+    .toUpperCase();
+
   if (inferred.kind === "nonhuman") {
     return inferred.costume;
   }
+
   if (inferred.kind === "human") {
-    // 役名から明確な人間コスチューム（CLERK_APRON等）が特定できた場合はそれを最優先する（AIの左右逆転を防ぐ）
-    if (inferred.costume && inferred.costume !== "CASUAL_PLAIN") {
+    // 役名から明確な人間コスチュームが
+    // 特定できた場合はそれを最優先する
+    if (
+      inferred.costume &&
+      inferred.costume !== "CASUAL_PLAIN"
+    ) {
       return inferred.costume;
     }
+
     if (/^(ANIMAL_|OBJECT_)/.test(aiCode)) {
       return "CASUAL_PLAIN";
     }
+
     return aiCode || "CASUAL_PLAIN";
   }
+
   return aiCode;
 }
 
 function parseCharacterNames(charDesc) {
-  const source = String(charDesc || "").trim().replace(/\r\n?/g, "\n");
+  const source = String(charDesc || "")
+    .trim()
+    .replace(/\r\n?/g, "\n");
+
   const cleanName = (raw) =>
     String(raw || "")
-      .replace(/^\s*(?:配役|登場人物|キャラクター)\s*[:：]\s*/, "")
-      .replace(/^\s*(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
-      .replace(/[（(](?:ボケ役?|ツッコミ役?|左(?:側|役)?|右(?:側|役)?)[）)]/g, "")
+      .replace(
+        /^\s*(?:配役|登場人物|キャラクター)\s*[:：]\s*/,
+        ""
+      )
+      .replace(
+        /^\s*(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/,
+        ""
+      )
+      .replace(
+        /[（(](?:ボケ役?|ツッコミ役?|左(?:側|役)?|右(?:側|役)?)[）)]/g,
+        ""
+      )
       .trim();
 
   const labeled = source.match(
     /^(?:(?:配役|登場人物|キャラクター)\s*[:：]\s*)?左(?:側|役)?\s*[:：]\s*(.+?)\s*(?:[,、，／/;；\n]|\s+・\s+|・)\s*右(?:側|役)?\s*[:：]\s*(.+?)\s*$/s
   );
+
   if (labeled) {
     return {
       bokeName: cleanName(labeled[1]) || "A",
@@ -428,22 +639,47 @@ function parseCharacterNames(charDesc) {
     };
   }
 
-  let parts = source.split(/[,、，／/;；\n]+/).map(cleanName).filter(Boolean);
+  let parts = source
+    .split(/[,、，／/;；\n]+/)
+    .map(cleanName)
+    .filter(Boolean);
+
   if (parts.length < 2) {
-    parts = source.split(/\s+・\s+/).map(cleanName).filter(Boolean);
+    parts = source
+      .split(/\s+・\s+/)
+      .map(cleanName)
+      .filter(Boolean);
   }
+
   if (parts.length < 2) {
-    const byTo = source.split(/\s*と\s*/).map(cleanName).filter(Boolean);
+    const byTo = source
+      .split(/\s*と\s*/)
+      .map(cleanName)
+      .filter(Boolean);
+
     if (byTo.length === 2) parts = byTo;
   }
+
   if (parts.length < 2 && source.includes("・")) {
-    const byDot = source.split("・").map(cleanName).filter(Boolean);
+    const byDot = source
+      .split("・")
+      .map(cleanName)
+      .filter(Boolean);
+
     if (byDot.length === 2) parts = byDot;
   }
+
   if (parts.length >= 2) {
-    return { bokeName: parts[0], tsukkomiName: parts[1] };
+    return {
+      bokeName: parts[0],
+      tsukkomiName: parts[1]
+    };
   }
-  return { bokeName: "A", tsukkomiName: "B" };
+
+  return {
+    bokeName: "A",
+    tsukkomiName: "B"
+  };
 }
 
 /* =========================
@@ -455,26 +691,42 @@ function extractStageMetaAndClean(rawText) {
   let leftCostume = "";
   let rightCostume = "";
 
-  const lines = String(rawText || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = String(rawText || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n");
+
   const remaining = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const mStage = trimmed.match(/^(?:\[)?STAGE\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+
+    const mStage = trimmed.match(
+      /^(?:\[)?STAGE\s*[:：]\s*([A-Z_]+)(?:\])?$/i
+    );
+
     if (mStage) {
       stageStyle = mStage[1].toUpperCase();
       continue;
     }
-    const mLeft = trimmed.match(/^(?:\[)?LEFT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+
+    const mLeft = trimmed.match(
+      /^(?:\[)?LEFT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i
+    );
+
     if (mLeft) {
       leftCostume = mLeft[1].toUpperCase();
       continue;
     }
-    const mRight = trimmed.match(/^(?:\[)?RIGHT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i);
+
+    const mRight = trimmed.match(
+      /^(?:\[)?RIGHT_COSTUME\s*[:：]\s*([A-Z_]+)(?:\])?$/i
+    );
+
     if (mRight) {
       rightCostume = mRight[1].toUpperCase();
       continue;
     }
+
     remaining.push(line);
   }
 
@@ -486,7 +738,12 @@ function extractStageMetaAndClean(rawText) {
   };
 }
 
-function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
+function enforceCharLimit(
+  text,
+  minLen,
+  maxLen,
+  allowOverflow = true
+) {
   if (!text) return "";
 
   let t = text
@@ -498,65 +755,125 @@ function enforceCharLimit(text, minLen, maxLen, allowOverflow = true) {
   if (!allowOverflow && t.length > maxLen) {
     const softCut = t.lastIndexOf("\n", maxLen);
     const softPuncs = ["。", "！", "？", "…", "♪"];
-    const softPuncCut = Math.max(...softPuncs.map((p) => t.lastIndexOf(p, maxLen)));
 
-    let cutPos = Math.max(softPuncCut, softCut);
+    const softPuncCut = Math.max(
+      ...softPuncs.map((p) => t.lastIndexOf(p, maxLen))
+    );
+
+    let cutPos = Math.max(
+      softPuncCut,
+      softCut
+    );
+
     if (cutPos < maxLen * 0.9) {
       cutPos = maxLen;
     }
 
     t = t.slice(0, cutPos).trim();
+
     if (!/[。！？…♪]$/.test(t)) {
       t += "。";
     }
   }
 
-  if (t.length < minLen && !/[。！？…♪]$/.test(t)) {
+  if (
+    t.length < minLen &&
+    !/[。！？…♪]$/.test(t)
+  ) {
     t += "。";
   }
 
   return t;
 }
 
-function detectTsukkomiSpeakerFromScript(text, fallbackName = "B") {
+function detectTsukkomiSpeakerFromScript(
+  text,
+  fallbackName = "B"
+) {
   if (!text) return fallbackName;
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
   const speakers = [];
+
   for (const line of lines) {
-    const m = line.match(/^([^:\n：]{1,15})[：:]\s*/);
+    const m = line.match(
+      /^([^:\n：]{1,15})[：:]\s*/
+    );
+
     if (m) {
       const who = m[1].trim();
-      if (who.includes("ツッコミ") || who.includes("右") || who === "B") {
+
+      if (
+        who.includes("ツッコミ") ||
+        who.includes("右") ||
+        who === "B"
+      ) {
         return who;
       }
+
       if (!speakers.includes(who)) {
         speakers.push(who);
       }
     }
   }
-  return speakers.length >= 2 ? speakers[1] : fallbackName;
+
+  return speakers.length >= 2
+    ? speakers[1]
+    : fallbackName;
 }
 
-function ensureManzaiTsukkomiOutro(text, defaultTsukkomiName = "B") {
-  const actualTsukkomi = detectTsukkomiSpeakerFromScript(text, defaultTsukkomiName);
-  const outro = `${actualTsukkomi}: [叩く] もういいよ！`;
+function ensureManzaiTsukkomiOutro(
+  text,
+  defaultTsukkomiName = "B"
+) {
+  const actualTsukkomi =
+    detectTsukkomiSpeakerFromScript(
+      text,
+      defaultTsukkomiName
+    );
+
+  const outro =
+    `${actualTsukkomi}: [叩く] もういいよ！`;
+
   if (!text) return outro;
 
   let t = text.trim();
-  const alreadyHasNaturalEnding = /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
+
+  const alreadyHasNaturalEnding =
+    /(?:もういいよ|もうええわ|いい加減にしろ|ありがとうございました)[！!ー〜]*\s*$/.test(t);
+
   if (alreadyHasNaturalEnding) {
     return t;
   }
 
-  return t ? `${t}\n\n${outro}` : outro;
+  return t
+    ? `${t}\n\n${outro}`
+    : outro;
 }
 
-function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
-  if (!leftRole || !rightRole || (leftRole === "A" && rightRole === "B")) return text;
+function canonicalizeConteSpeakerLabels(
+  text,
+  leftRole,
+  rightRole
+) {
+  if (
+    !leftRole ||
+    !rightRole ||
+    (leftRole === "A" && rightRole === "B")
+  ) {
+    return text;
+  }
 
   const normalize = (s) =>
     String(s || "")
-      .replace(/^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/, "")
+      .replace(
+        /^(?:左(?:側|役)?|右(?:側|役)?|ボケ役?|ツッコミ役?)\s*[:：]\s*/,
+        ""
+      )
       .replace(/[（(][^）)]*[）)]/g, "")
       .replace(/[\s 「」『』]/g, "")
       .replace(/スマートフォン/g, "スマホ")
@@ -564,21 +881,41 @@ function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
       .replace(/イヌ/g, "犬")
       .replace(/うさぎ/g, "ウサギ");
 
-  const cast = [normalize(leftRole), normalize(rightRole)];
-  const castInferred = [inferRoleCostume(cast[0]), inferRoleCostume(cast[1])];
+  const cast = [
+    normalize(leftRole),
+    normalize(rightRole)
+  ];
+
+  const castInferred = [
+    inferRoleCostume(cast[0]),
+    inferRoleCostume(cast[1])
+  ];
 
   const normalizeSideHint = (original) => {
     const s = String(original || "").trim();
-    if (/^(?:左(?:側|役)?|ボケ役?|A|①|1)(?:[（(].*?[）)])?$/.test(s)) return 0;
-    if (/^(?:右(?:側|役)?|ツッコミ役?|B|②|2)(?:[（(].*?[）)])?$/.test(s)) return 1;
+
+    if (
+      /^(?:左(?:側|役)?|ボケ役?|A|①|1)(?:[（(].*?[）)])?$/.test(s)
+    ) {
+      return 0;
+    }
+
+    if (
+      /^(?:右(?:側|役)?|ツッコミ役?|B|②|2)(?:[（(].*?[）)])?$/.test(s)
+    ) {
+      return 1;
+    }
+
     if (/^(?:左|ボケ)[:：]/.test(s)) return 0;
     if (/^(?:右|ツッコミ)[:：]/.test(s)) return 1;
+
     return null;
   };
 
   const matchScore = (speaker, sideIdx) => {
     const role = cast[sideIdx];
     if (!speaker || !role) return 0;
+
     if (speaker === role) return 150;
 
     const spkKind = inferRoleCostume(speaker);
@@ -586,13 +923,21 @@ function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
 
     if (spkKind.kind === "nonhuman") {
       if (roleKind.kind === "human") return 0;
+
       if (roleKind.kind === "nonhuman") {
-        return spkKind.costume === roleKind.costume ? 130 : 0;
+        return spkKind.costume === roleKind.costume
+          ? 130
+          : 0;
       }
     }
-    if (spkKind.kind === "human" && roleKind.kind === "nonhuman") {
+
+    if (
+      spkKind.kind === "human" &&
+      roleKind.kind === "nonhuman"
+    ) {
       return 0;
     }
+
     if (
       spkKind.kind === "human" &&
       roleKind.kind === "human" &&
@@ -603,10 +948,33 @@ function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
       return 115;
     }
 
-    if (speaker.length >= 2 && role.endsWith(speaker)) return 110;
-    if (speaker.length >= 2 && role.startsWith(speaker)) return 95;
-    if (speaker.length >= 2 && role.includes(speaker)) return 80;
-    if (role.length >= 2 && speaker.includes(role)) return 75;
+    if (
+      speaker.length >= 2 &&
+      role.endsWith(speaker)
+    ) {
+      return 110;
+    }
+
+    if (
+      speaker.length >= 2 &&
+      role.startsWith(speaker)
+    ) {
+      return 95;
+    }
+
+    if (
+      speaker.length >= 2 &&
+      role.includes(speaker)
+    ) {
+      return 80;
+    }
+
+    if (
+      role.length >= 2 &&
+      speaker.includes(role)
+    ) {
+      return 75;
+    }
 
     const aliases = {
       "犬": "柴犬",
@@ -631,64 +999,130 @@ function canonicalizeConteSpeakerLabels(text, leftRole, rightRole) {
       "強盗": "銀行強盗",
       "ドライバー": "運転手"
     };
+
     const canonical = aliases[speaker] || speaker;
-    if (canonical !== speaker && role.includes(canonical)) return 70;
+
+    if (
+      canonical !== speaker &&
+      role.includes(canonical)
+    ) {
+      return 70;
+    }
+
     return 0;
   };
 
   const lines = String(text).split("\n");
   const labels = [];
+
   for (const line of lines) {
-    const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
-    if (m && !/^\d+$/.test(m[2].trim())) {
+    const m = line.match(
+      /^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/
+    );
+
+    if (
+      m &&
+      !/^\d+$/.test(m[2].trim())
+    ) {
       const name = m[2].trim();
-      if (!labels.includes(name)) labels.push(name);
+
+      if (!labels.includes(name)) {
+        labels.push(name);
+      }
     }
   }
 
   const assigned = new Map();
+
   for (const label of labels) {
     const hint = normalizeSideHint(label);
+
     if (hint !== null) {
       assigned.set(label, hint);
       continue;
     }
+
     const name = normalize(label);
     const s0 = matchScore(name, 0);
     const s1 = matchScore(name, 1);
-    if (s0 > s1 && s0 >= 55) assigned.set(label, 0);
-    else if (s1 > s0 && s1 >= 55) assigned.set(label, 1);
+
+    if (
+      s0 > s1 &&
+      s0 >= 55
+    ) {
+      assigned.set(label, 0);
+    } else if (
+      s1 > s0 &&
+      s1 >= 55
+    ) {
+      assigned.set(label, 1);
+    }
   }
 
-  const unknown = labels.filter((label) => !assigned.has(label));
-  const used = new Set(assigned.values());
-  if (unknown.length === 1 && used.size === 1) {
+  const unknown = labels.filter(
+    (label) => !assigned.has(label)
+  );
+
+  const used = new Set(
+    assigned.values()
+  );
+
+  if (
+    unknown.length === 1 &&
+    used.size === 1
+  ) {
     const vacant = used.has(0) ? 1 : 0;
-    const spokenKind = inferRoleCostume(normalize(unknown[0]));
+
+    const spokenKind =
+      inferRoleCostume(normalize(unknown[0]));
+
     const vacantKind = castInferred[vacant];
+
     if (
       spokenKind.kind !== "nonhuman" ||
-      (vacantKind.kind === "nonhuman" && spokenKind.costume === vacantKind.costume)
+      (
+        vacantKind.kind === "nonhuman" &&
+        spokenKind.costume === vacantKind.costume
+      )
     ) {
       assigned.set(unknown[0], vacant);
     }
-  } else if (unknown.length === 2 && used.size === 0) {
+  } else if (
+    unknown.length === 2 &&
+    used.size === 0
+  ) {
     assigned.set(unknown[0], 0);
     assigned.set(unknown[1], 1);
   }
 
   return lines
     .map((line) => {
-      const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
-      if (!m || !assigned.has(m[2].trim())) return line;
-      const roleName = assigned.get(m[2].trim()) === 0 ? leftRole : rightRole;
+      const m = line.match(
+        /^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/
+      );
+
+      if (
+        !m ||
+        !assigned.has(m[2].trim())
+      ) {
+        return line;
+      }
+
+      const roleName =
+        assigned.get(m[2].trim()) === 0
+          ? leftRole
+          : rightRole;
+
       return `${m[1]}${roleName}: ${m[3].trimStart()}`;
     })
     .join("\n");
 }
 
 function normalizeSpeakerColons(s) {
-  return s.replace(/(^|\n)([^\n:：]+)[：:]\s*/g, (_m, head, name) => `${head}${name}: `);
+  return s.replace(
+    /(^|\n)([^\n:：]+)[：:]\s*/g,
+    (_m, head, name) => `${head}${name}: `
+  );
 }
 
 function ensureBlankLineBetweenTurns(text) {
@@ -703,57 +1137,105 @@ function ensureBlankLineBetweenTurns(text) {
     ) {
       continue;
     }
+
     compressed.push(ln);
   }
 
   const out = [];
+
   for (let i = 0; i < compressed.length; i++) {
     const cur = compressed[i];
     out.push(cur);
 
-    const isTurn = /^[^:\n：]+:\s/.test(cur.trim());
+    const isTurn =
+      /^[^:\n：]+:\s/.test(cur.trim());
+
     const next = compressed[i + 1];
-    const nextIsTurn = next != null && /^[^:\n：]+:\s/.test(next?.trim() || "");
+
+    const nextIsTurn =
+      next != null &&
+      /^[^:\n：]+:\s/.test(next?.trim() || "");
 
     if (isTurn && nextIsTurn) {
-      if (cur.trim() !== "" && (next || "").trim() !== "") {
+      if (
+        cur.trim() !== "" &&
+        (next || "").trim() !== ""
+      ) {
         out.push("");
       }
     }
   }
 
-  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 function splitTitleAndBody(s) {
-  if (!s) return { title: "", body: "" };
+  if (!s) {
+    return {
+      title: "",
+      body: ""
+    };
+  }
 
   const trimmed = String(s).trim();
-
   const firstLine = trimmed.split(/\r?\n/)[0].trim();
-  if (/^[^:\n：]{1,25}[：:]\s*\S/.test(firstLine) && !/^(タイトル|Title)/i.test(firstLine)) {
-    return { title: "", body: trimmed };
+
+  if (
+    /^[^:\n：]{1,25}[：:]\s*\S/.test(firstLine) &&
+    !/^(タイトル|Title)/i.test(firstLine)
+  ) {
+    return {
+      title: "",
+      body: trimmed
+    };
   }
 
   const match = trimmed.match(/\r?\n\r?\n/);
-  if (!match || match.index === undefined) {
+
+  if (
+    !match ||
+    match.index === undefined
+  ) {
     const firstNewline = trimmed.indexOf("\n");
+
     if (firstNewline === -1) {
-      return { title: "", body: trimmed };
+      return {
+        title: "",
+        body: trimmed
+      };
     }
-    const rawTitle = trimmed.slice(0, firstNewline).trim();
-    const body = trimmed.slice(firstNewline + 1).trim();
+
+    const rawTitle =
+      trimmed.slice(0, firstNewline).trim();
+
+    const body =
+      trimmed.slice(firstNewline + 1).trim();
+
     return {
-      title: rawTitle.replace(/^【/, "").replace(/】$/, ""),
+      title: rawTitle
+        .replace(/^【/, "")
+        .replace(/】$/, ""),
       body
     };
   }
 
-  const rawTitle = trimmed.slice(0, match.index).trim();
-  const title = rawTitle.replace(/^【/, "").replace(/】$/, "");
-  const body = trimmed.slice(match.index + match[0].length).trim();
+  const rawTitle =
+    trimmed.slice(0, match.index).trim();
 
-  return { title, body };
+  const title = rawTitle
+    .replace(/^【/, "")
+    .replace(/】$/, "");
+
+  const body = trimmed
+    .slice(match.index + match[0].length)
+    .trim();
+
+  return {
+    title,
+    body
+  };
 }
 
 function normalizeTitleString(str = "") {
@@ -761,22 +1243,34 @@ function normalizeTitleString(str = "") {
     .trim()
     .replace(/^【/, "")
     .replace(/】$/, "")
-    .replace(/^(タイトル|Title)\s*[:：】]?\s*/i, "")
+    .replace(
+      /^(タイトル|Title)\s*[:：】]?\s*/i,
+      ""
+    )
     .replace(/^#{1,6}\s*/, "")
     .replace(/\s+/g, " ");
 }
 
 function ensureSingleTitle(titleIn, bodyIn) {
-  let title = normalizeTitleString(titleIn || "");
-  let body = (bodyIn || "").replace(/\r\n/g, "\n");
+  let title = normalizeTitleString(
+    titleIn || ""
+  );
+
+  let body = (bodyIn || "")
+    .replace(/\r\n/g, "\n");
+
   let lines = body.split("\n");
 
-  while (lines.length && lines[0].trim() === "") {
+  while (
+    lines.length &&
+    lines[0].trim() === ""
+  ) {
     lines.shift();
   }
 
   if (!title && lines.length) {
     const first = lines[0].trim();
+
     if (
       first.startsWith("#") ||
       /^【.+】$/.test(first) ||
@@ -784,16 +1278,24 @@ function ensureSingleTitle(titleIn, bodyIn) {
     ) {
       title = normalizeTitleString(first);
       lines.shift();
-      while (lines.length && lines[0].trim() === "") {
+
+      while (
+        lines.length &&
+        lines[0].trim() === ""
+      ) {
         lines.shift();
       }
     }
   }
 
   if (title && lines.length) {
-    const normTitle = normalizeTitleString(title);
+    const normTitle =
+      normalizeTitleString(title);
+
     const first = lines[0].trim();
-    const firstNorm = normalizeTitleString(first);
+
+    const firstNorm =
+      normalizeTitleString(first);
 
     if (
       first.startsWith("#") ||
@@ -802,9 +1304,14 @@ function ensureSingleTitle(titleIn, bodyIn) {
       firstNorm.toLowerCase() === normTitle.toLowerCase()
     ) {
       lines.shift();
-      while (lines.length && lines[0].trim() === "") {
+
+      while (
+        lines.length &&
+        lines[0].trim() === ""
+      ) {
         lines.shift();
       }
+
       title = normTitle;
     }
   }
@@ -829,9 +1336,55 @@ function buildPromptByMode({
 }) {
   const isConte = mode === "conte";
 
-  const bokeTable = isConte ? { ...MANZAI_BOKE_DEFS, ...CONTE_BOKE_DEFS } : MANZAI_BOKE_DEFS;
-  const tsukkomiTable = isConte ? { ...MANZAI_TSUKKOMI_DEFS, ...CONTE_TSUKKOMI_DEFS } : MANZAI_TSUKKOMI_DEFS;
-  const generalTable = isConte ? { ...MANZAI_GENERAL_DEFS, ...CONTE_GENERAL_DEFS } : MANZAI_GENERAL_DEFS;
+  // iOS / Android 共通。身体動作は1つ、視覚効果は任意で1つ。
+  // 既存タグはすべて残すことで過去の台本との互換性を維持する。
+  const extendedActionRules = [
+    "- [驚く] ：両腕を上げてのけぞる。予想外の発言へのリアクション",
+    "- [怒る] ：腰に手を当て、体を揺らして怒りを表す",
+    "- [ドヤ顔] ：胸を張り、腰に手を当てて自慢する",
+    "- [爆笑] ：上半身を前後に揺らして大笑いする",
+    "- [指差し] ：相手を指差して指摘する",
+    "- [ジャンプ] ：驚きや歓喜でその場で跳び上がる",
+    "- [無反応] ：驚きや呆れをあえて無言・静止で表す",
+    "- [震える] ：怒り・恐怖・緊張で体を小刻みに震わせる",
+    "- [拍手] ：相手を称賛、または皮肉で拍手する",
+    "- [ひざまずく] ：片膝または両膝をついて懇願する（[土下座]とは区別）",
+    "- [振り返る] ：相手や客席の方向へ顔と体を向け直す",
+    "- [決めポーズ] ：両腕を大きく広げ、ポーズを決めて静止する"
+  ].join("\n");
+
+  const extendedEffectRules = [
+    "- [怒りマーク] ：怒った人物の頭付近に怒り記号を表示する",
+    "- [集中線] ：強烈な発言や決めポーズを放射状の線で強調する"
+  ].join("\n");
+
+  const commonDirectionRules = [
+    "【新しい身体動作タグ（必要な場面だけ使用）】",
+    extendedActionRules,
+    "【視覚効果タグ（必要な場面だけ使用）】",
+    extendedEffectRules,
+    "【演出タグの書式】",
+    "話者名: [身体動作タグ] [視覚効果タグ] セリフ の順に記載する。視覚効果を使わない場合は身体動作タグのみ。",
+    "例：ボケ: [決めポーズ][集中線] これが俺の最終形態だ！",
+    "例：ツッコミ: [怒る][怒りマーク] 何を言ってるんだよ！",
+    "身体動作タグは1セリフに必ず1つ、視覚効果タグは0〜1つとする。複数の身体動作タグを重ねない。",
+    "新しいタグを機械的に均等に使わず、セリフの意味と感情に合うものだけを選ぶ。通常会話は[通常]を使い、動きすぎない。",
+    "[無反応]でもセリフは普通に書ける。音声がある場合は身体だけ静止する演出を想定する。",
+    "怒りマークと集中線は単独では使わず、必ず身体動作タグの後に付ける。",
+    "話者名とセリフのテキストを壊さず、タグは必ずセリフ冒頭（コロン直後）に置く。"
+  ].join("\n");
+
+  const bokeTable = isConte
+    ? { ...MANZAI_BOKE_DEFS, ...CONTE_BOKE_DEFS }
+    : MANZAI_BOKE_DEFS;
+
+  const tsukkomiTable = isConte
+    ? { ...MANZAI_TSUKKOMI_DEFS, ...CONTE_TSUKKOMI_DEFS }
+    : MANZAI_TSUKKOMI_DEFS;
+
+  const generalTable = isConte
+    ? { ...MANZAI_GENERAL_DEFS, ...CONTE_GENERAL_DEFS }
+    : MANZAI_GENERAL_DEFS;
 
   const boke = Array.isArray(selected.boke) ? selected.boke : [];
   const tsukkomi = Array.isArray(selected.tsukkomi) ? selected.tsukkomi : [];
@@ -876,9 +1429,16 @@ function buildPromptByMode({
     .filter(Boolean);
 
   const guidelineParts = [];
-  if (bokeLines.length) guidelineParts.push("【ボケ技法】", ...bokeLines);
-  if (tsukkomiLines.length) guidelineParts.push("【ツッコミ技法】", ...tsukkomiLines);
-  if (generalLines.length) guidelineParts.push("【全般の構成技法】", ...generalLines);
+  if (bokeLines.length) {
+    guidelineParts.push("【ボケ技法】", ...bokeLines);
+  }
+  if (tsukkomiLines.length) {
+    guidelineParts.push("【ツッコミ技法】", ...tsukkomiLines);
+  }
+  if (generalLines.length) {
+    guidelineParts.push("【全般の構成技法】", ...generalLines);
+  }
+
   const guideline = guidelineParts.join("\n");
 
   const techniquesForMeta = [
@@ -886,28 +1446,41 @@ function buildPromptByMode({
     ...selectedLabels.tsukkomi,
     ...selectedLabels.general
   ];
+
   const structureMeta = [...selectedLabels.general];
 
   const cleanedTheme = String(theme || "")
     .replace(/（※漫才ではなく[\s\S]*?）/g, "")
     .trim();
 
-  const safeTheme = cleanedTheme || (isConte ? "深夜のコンビニ" : "日常生活");
-  const safeGenre = String(genre || "").trim() || (isConte ? "コント" : "漫才");
+  const safeTheme = cleanedTheme ||
+    (isConte ? "深夜のコンビニ" : "日常生活");
+
+  const safeGenre = String(genre || "").trim() ||
+    (isConte ? "コント" : "漫才");
+
   const charDesc =
     typeof characters === "string"
       ? characters.trim()
       : JSON.stringify(characters ?? "");
 
-  const { bokeName, tsukkomiName } = parseCharacterNames(charDesc);
+  const { bokeName, tsukkomiName } =
+    parseCharacterNames(charDesc);
 
   const targetLen =
     Number.isFinite(Number(length)) && Number(length) > 0
       ? Math.floor(Number(length))
       : 1000;
 
-  const minLen = Math.max(100, Math.floor(targetLen * 0.9));
-  const maxLen = Math.max(minLen, Math.ceil(targetLen * 1.1));
+  const minLen = Math.max(
+    100,
+    Math.floor(targetLen * 0.9)
+  );
+
+  const maxLen = Math.max(
+    minLen,
+    Math.ceil(targetLen * 1.1)
+  );
 
   const techniqueText = techniquesForMeta.length
     ? techniquesForMeta.join("、")
@@ -943,7 +1516,9 @@ function buildPromptByMode({
       "【採用するコント技法】",
       techniqueText,
       "",
-      guideline ? "【技法ガイドライン】\n" + guideline : "",
+      guideline
+        ? "【技法ガイドライン】\n" + guideline
+        : "",
       "",
       "【舞台セットと演者の姿・衣装の指定（最優先・必須）】",
       "アプリのステージ背景と2人の姿（人間・動物・物）を完全一致させるため、出力の一番最初（タイトルの前）に以下の3行を必ず出力してください。",
@@ -954,7 +1529,7 @@ function buildPromptByMode({
       costumeCodesList,
       "",
       "【アプリ上演用の演出タグルール（重要）】",
-      "基本的には2人が立ち止まって会話し、意味のある場面でのみ移動や特殊リアクションを行うよう、各セリフのコロン（:）の直後に以下のタグを1つ付けてください。",
+      "基本的には2人が立ち止まって会話し、意味のある場面でのみ移動や特殊リアクションを行うよう、各セリフのコロン（:）の直後に身体動作タグを1つ付けてください。必要に応じて視覚効果タグを1つ追加できます。",
       "- [通常] ：立ち止まって通常の会話をする",
       "- [ボケ] ：立ち止まっておどけたボケ、ズレた発言をする",
       "- [演技] ：役柄になりきった芝居・マイムをする",
@@ -970,6 +1545,7 @@ function buildPromptByMode({
       "- [詰め寄る] ：（意味のある移動）相手の目の前までグッと歩いて迫る・圧をかける",
       "- [逃げる] ：（意味のある移動）怖がったり驚いたりして舞台の端へ後ずさりして離れる",
       "- [隠れる] ：（意味のある移動）舞台の奥へ身を潜める",
+      commonDirectionRules,
       "",
       "【コントの出力フォーマット（厳守）】",
       "1〜3行目：STAGE / LEFT_COSTUME / RIGHT_COSTUME の指定",
@@ -1002,7 +1578,7 @@ function buildPromptByMode({
     "舞台でそのまま使える、日本語の漫才台本を作成してください。",
     "説明や分析ではなく、完成した台本だけを出力してください。",
     "必ず自然な掛け合いと、伏線を回収する明確で面白いオチを作ってください。",
-    "アプリのステージ演出と連携するため、指定された演出タグ（[通常] [ボケ] [演技] [疑問] [呆れ] [ツッコミ] [叩く]）を各セリフの先頭に必ず付けてください。"
+    "アプリのステージ演出と連携するため、指定された身体動作タグを各セリフの先頭に必ず1つ付け、必要に応じて視覚効果タグを1つ追加してください。"
   ].join("\n");
 
   const prompt = [
@@ -1017,10 +1593,12 @@ function buildPromptByMode({
     "【採用する技法】",
     techniqueText,
     "",
-    guideline ? "【技法ガイドライン】\n" + guideline : "",
+    guideline
+      ? "【技法ガイドライン】\n" + guideline
+      : "",
     "",
     "【アプリ上演用の演出タグルール（重要）】",
-    "アプリ内でキャラクターが動き・声色・効果音をつけるため、各セリフのコロン（:）の直後に、文脈に合った以下の演出タグを1つ付けてください。",
+    "アプリ内でキャラクターが動き・声色・効果音をつけるため、各セリフのコロン（:）の直後に身体動作タグを1つ付け、必要な場合だけ視覚効果タグを1つ付けてください。",
     "- [通常] ：普通の会話やフリのセリフ",
     "- [ボケ] ：おどけたボケ、アホな発言、ズレた発言",
     "- [演技] ：コント風のなりきり、モノマネ、カギカッコ付きのセリフ",
@@ -1028,6 +1606,7 @@ function buildPromptByMode({
     "- [呆れ] ：呆れたツッコミ、ため息混じりの冷静な指摘",
     "- [ツッコミ] ：通常の勢いあるツッコミ・指摘",
     "- [叩く] ：ネタ後半のクライマックスや決定的な瞬間、または最後の締めに入れる「ここぞという渾身の強ツッコミ」（※台本全体で1〜2回だけに厳選すること！）",
+    commonDirectionRules,
     "",
     "【出力ルール】",
     "- タイトルを最初に1つだけ出す（【】や「タイトル:」は付けずタイトル文字列のみ）。",
@@ -1071,16 +1650,21 @@ const openai = OPENAI_API_KEY
 function extractTextFromResponse(response) {
   if (!response) return "";
 
-  if (typeof response.output_text === "string" && response.output_text.trim().length > 0) {
+  if (
+    typeof response.output_text === "string" &&
+    response.output_text.trim().length > 0
+  ) {
     return response.output_text;
   }
 
   if (Array.isArray(response.output)) {
     const chunks = [];
+
     for (const item of response.output) {
       if (typeof item?.text === "string") {
         chunks.push(item.text);
       }
+
       if (Array.isArray(item?.content)) {
         for (const c of item.content) {
           if (typeof c?.text === "string") {
@@ -1091,11 +1675,14 @@ function extractTextFromResponse(response) {
         }
       }
     }
+
     const joined = chunks.join("\n").trim();
     if (joined.length > 0) return joined;
   }
 
-  if (typeof response?.choices?.[0]?.message?.content === "string") {
+  if (
+    typeof response?.choices?.[0]?.message?.content === "string"
+  ) {
     return response.choices[0].message.content;
   }
 
@@ -1113,10 +1700,18 @@ const client = {
         }
 
         const model = payload.model || OPENAI_MODEL;
-        const messages = Array.isArray(payload.messages) ? payload.messages : [];
+
+        const messages = Array.isArray(payload.messages)
+          ? payload.messages
+          : [];
 
         const input = messages.map((m) => ({
-          role: m.role === "assistant" ? "assistant" : m.role === "system" ? "system" : "user",
+          role:
+            m.role === "assistant"
+              ? "assistant"
+              : m.role === "system"
+                ? "system"
+                : "user",
           content: String(m.content ?? "")
         }));
 
@@ -1159,7 +1754,10 @@ function normalizeError(err) {
     message: err?.message,
     status: err?.status ?? err?.response?.status,
     data: err?.response?.data ?? err?.error,
-    stack: process.env.NODE_ENV === "production" ? undefined : err?.stack
+    stack:
+      process.env.NODE_ENV === "production"
+        ? undefined
+        : err?.stack
   };
 }
 
@@ -1169,7 +1767,9 @@ function normalizeError(err) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res.status(405).json({
+      error: "Method Not Allowed"
+    });
   }
 
   try {
@@ -1181,13 +1781,22 @@ export default async function handler(req, res) {
     const scopedUserId = resolveScopedUserId(rawUserId, mode);
 
     // 1. 購入クレジット追加 / 買い切りアンロック
-    if (action === "add_credits" || action === "add_credit") {
-      return res.status(403).json({ error: "Purchase verification required" });
+    if (
+      action === "add_credits" ||
+      action === "add_credit"
+    ) {
+      return res.status(403).json({
+        error: "Purchase verification required"
+      });
     }
 
     // 2. クレジット残高照会
-    if (action === "get_credit" || action === "get_credits") {
+    if (
+      action === "get_credit" ||
+      action === "get_credits"
+    ) {
       const row = await getUsageRow(scopedUserId);
+
       return res.status(200).json({
         ok: true,
         mode,
@@ -1218,7 +1827,11 @@ export default async function handler(req, res) {
           "表参道の美容室・パーソナルジム・通販番組スタジオでキャラが暴走するコント",
           "終電の駅のホーム・実家のお茶の間でまさかの秘密が発覚する日常コント"
         ];
-        const pickCat = conteCategories[Math.floor(Math.random() * conteCategories.length)];
+
+        const pickCat =
+          conteCategories[
+            Math.floor(Math.random() * conteCategories.length)
+          ];
 
         const contePresetPrompt = [
           "あなたはキングオブコントの優勝ネタを手掛けるプロのコント作家です。",
@@ -1232,20 +1845,31 @@ export default async function handler(req, res) {
         const aiResp = await client.chat.completions.create({
           model: OPENAI_MODEL,
           messages: [
-            { role: "system", content: "JSONのみを出力するプロのコント設定クリエイター" },
-            { role: "user", content: contePresetPrompt }
+            {
+              role: "system",
+              content: "JSONのみを出力するプロのコント設定クリエイター"
+            },
+            {
+              role: "user",
+              content: contePresetPrompt
+            }
           ]
         });
 
-        const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
+        const rawJson = String(
+          aiResp?.choices?.[0]?.message?.content || ""
+        )
           .replace(/```(?:json)?/gi, "")
           .replace(/```/g, "")
           .trim();
 
         let parsed = null;
+
         try {
           const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
-          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+          parsed = JSON.parse(
+            jsonMatch ? jsonMatch[0] : rawJson
+          );
         } catch (_e) {
           parsed = null;
         }
@@ -1253,9 +1877,16 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           mode: "conte",
-          theme: String(parsed?.theme || "深夜のコンビニ").trim(),
-          genre: String(parsed?.genre || "日常×シュール").trim(),
-          characters: String(parsed?.characters || "クセが強すぎる新人店員, 普通に買い物したい客").trim()
+          theme: String(
+            parsed?.theme || "深夜のコンビニ"
+          ).trim(),
+          genre: String(
+            parsed?.genre || "日常×シュール"
+          ).trim(),
+          characters: String(
+            parsed?.characters ||
+              "クセが強すぎる新人店員, 普通に買い物したい客"
+          ).trim()
         });
       } else {
         const manzaiCategories = [
@@ -1266,7 +1897,11 @@ export default async function handler(req, res) {
           "AI・最新テクノロジー・将来の夢・新しいビジネスなどを熱弁するボケと現実的なツッコミの掛け合い漫才",
           "小学校の運動会・修学旅行・部活の謎ルールを大人目線で振り返るハイテンポ漫才"
         ];
-        const pickManzaiCat = manzaiCategories[Math.floor(Math.random() * manzaiCategories.length)];
+
+        const pickManzaiCat =
+          manzaiCategories[
+            Math.floor(Math.random() * manzaiCategories.length)
+          ];
 
         const manzaiPresetPrompt = [
           "あなたはM-1グランプリの優勝ネタを手掛けるプロの漫才作家です。",
@@ -1279,20 +1914,31 @@ export default async function handler(req, res) {
         const aiResp = await client.chat.completions.create({
           model: OPENAI_MODEL,
           messages: [
-            { role: "system", content: "JSONのみを出力するプロの漫才設定クリエイター" },
-            { role: "user", content: manzaiPresetPrompt }
+            {
+              role: "system",
+              content: "JSONのみを出力するプロの漫才設定クリエイター"
+            },
+            {
+              role: "user",
+              content: manzaiPresetPrompt
+            }
           ]
         });
 
-        const rawJson = String(aiResp?.choices?.[0]?.message?.content || "")
+        const rawJson = String(
+          aiResp?.choices?.[0]?.message?.content || ""
+        )
           .replace(/```(?:json)?/gi, "")
           .replace(/```/g, "")
           .trim();
 
         let parsed = null;
+
         try {
           const jsonMatch = rawJson.match(/\{[\s\S]*\}/);
-          parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawJson);
+          parsed = JSON.parse(
+            jsonMatch ? jsonMatch[0] : rawJson
+          );
         } catch (_e) {
           parsed = null;
         }
@@ -1300,21 +1946,37 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           mode: "manzai",
-          theme: String(parsed?.theme || "無人島に1つだけ持っていくもの").trim(),
-          genre: String(parsed?.genre || "しゃべくり漫才").trim(),
-          characters: String(parsed?.characters || "屁理屈で変な日用品を推すボケ, 論破したいツッコミ").trim()
+          theme: String(
+            parsed?.theme ||
+              "無人島に1つだけ持っていくもの"
+          ).trim(),
+          genre: String(
+            parsed?.genre || "しゃべくり漫才"
+          ).trim(),
+          characters: String(
+            parsed?.characters ||
+              "屁理屈で変な日用品を推すボケ, 論破したいツッコミ"
+          ).trim()
         });
       }
     }
 
     // 4. 通常生成（漫才 または コント）
     if (action !== "generate") {
-      return res.status(400).json({ error: "Unknown action" });
+      return res.status(400).json({
+        error: "Unknown action"
+      });
     }
 
     let verifiedIOS = false;
+
     if (mode === "manzai" && body.app_attest) {
-      const attestationResult = await verifyManzaiAssertion(body, body.app_attest);
+      const attestationResult =
+        await verifyManzaiAssertion(
+          body,
+          body.app_attest
+        );
+
       verifiedIOS = attestationResult?.verified === true;
     }
 
@@ -1324,7 +1986,9 @@ export default async function handler(req, res) {
     const characters = body.characters ?? "";
     const length = Number(body.length || 1000);
 
-    const rawSelected = body.selected || body.techniques || {};
+    const rawSelected =
+      body.selected || body.techniques || {};
+
     const selected = {
       boke: Array.isArray(rawSelected.boke)
         ? rawSelected.boke
@@ -1343,7 +2007,13 @@ export default async function handler(req, res) {
           : []
     };
 
-    const credit = await checkCredit(scopedUserId, plan_type, mode, verifiedIOS);
+    const credit = await checkCredit(
+      scopedUserId,
+      plan_type,
+      mode,
+      verifiedIOS
+    );
+
     if (!credit.ok) {
       return res.status(402).json({
         error: "クレジットが不足しています。",
@@ -1367,7 +2037,14 @@ export default async function handler(req, res) {
       safeTheme,
       safeGenre,
       charDesc
-    } = buildPromptByMode({ mode, theme, genre, characters, length, selected });
+    } = buildPromptByMode({
+      mode,
+      theme,
+      genre,
+      characters,
+      length,
+      selected
+    });
 
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
@@ -1384,49 +2061,112 @@ export default async function handler(req, res) {
     });
 
     let raw = response?.choices?.[0]?.message?.content || "";
+
     raw = String(raw)
       .replace(/^```(?:text|markdown|txt)?\s*/i, "")
       .replace(/\s*```$/i, "")
       .trim();
 
-    const { cleanedRaw, stageStyle, leftCostume: aiLeftCostume, rightCostume: aiRightCostume } = extractStageMetaAndClean(raw);
-    const leftCostume = mode === "conte" ? reconcileRoleCostume(bokeName, aiLeftCostume) : aiLeftCostume;
-    const rightCostume = mode === "conte" ? reconcileRoleCostume(tsukkomiName, aiRightCostume) : aiRightCostume;
+    const {
+      cleanedRaw,
+      stageStyle,
+      leftCostume: aiLeftCostume,
+      rightCostume: aiRightCostume
+    } = extractStageMetaAndClean(raw);
 
-    let { title, body: generatedBody } = splitTitleAndBody(cleanedRaw);
-    const normalized = ensureSingleTitle(title, generatedBody);
+    const leftCostume =
+      mode === "conte"
+        ? reconcileRoleCostume(bokeName, aiLeftCostume)
+        : aiLeftCostume;
 
-    title = normalized.title && normalized.title !== "無題" ? normalized.title : safeTheme;
+    const rightCostume =
+      mode === "conte"
+        ? reconcileRoleCostume(tsukkomiName, aiRightCostume)
+        : aiRightCostume;
+
+    let {
+      title,
+      body: generatedBody
+    } = splitTitleAndBody(cleanedRaw);
+
+    const normalized = ensureSingleTitle(
+      title,
+      generatedBody
+    );
+
+    title =
+      normalized.title && normalized.title !== "無題"
+        ? normalized.title
+        : safeTheme;
+
     let bodyText = normalized.body;
 
     bodyText = normalizeSpeakerColons(bodyText);
+
     if (mode === "conte") {
-      bodyText = canonicalizeConteSpeakerLabels(bodyText, bokeName, tsukkomiName);
+      bodyText = canonicalizeConteSpeakerLabels(
+        bodyText,
+        bokeName,
+        tsukkomiName
+      );
     }
+
     bodyText = ensureBlankLineBetweenTurns(bodyText);
-    bodyText = enforceCharLimit(bodyText, minLen, maxLen, true);
+    bodyText = enforceCharLimit(
+      bodyText,
+      minLen,
+      maxLen,
+      true
+    );
 
     if (mode === "manzai") {
-      bodyText = ensureManzaiTsukkomiOutro(bodyText, tsukkomiName);
+      bodyText = ensureManzaiTsukkomiOutro(
+        bodyText,
+        tsukkomiName
+      );
     }
 
-    const consumption = await consumeAfterSuccess(scopedUserId, plan_type, mode, verifiedIOS);
+    const consumption = await consumeAfterSuccess(
+      scopedUserId,
+      plan_type,
+      mode,
+      verifiedIOS
+    );
 
-    const safeLeftRole = bokeName.replace(/[|\r\n]/g, " ");
-    const safeRightRole = tsukkomiName.replace(/[|\r\n]/g, " ");
+    const safeLeftRole =
+      bokeName.replace(/[|\r\n]/g, " ");
+
+    const safeRightRole =
+      tsukkomiName.replace(/[|\r\n]/g, " ");
 
     const fullSettingInfo = [
       safeTheme,
       safeGenre,
       `${safeLeftRole}, ${safeRightRole}`,
-      mode === "conte" ? `CAST_LEFT:${safeLeftRole}` : "",
-      mode === "conte" ? `CAST_RIGHT:${safeRightRole}` : "",
-      stageStyle ? `STAGE:${stageStyle}` : "",
-      leftCostume ? `LEFT_COSTUME:${leftCostume}` : "",
-      rightCostume ? `RIGHT_COSTUME:${rightCostume}` : "",
-      mode === "conte" ? `LEFT_ROLE:${safeLeftRole}` : "",
-      mode === "conte" ? `RIGHT_ROLE:${safeRightRole}` : ""
-    ].filter(Boolean).join(" | ");
+      mode === "conte"
+        ? `CAST_LEFT:${safeLeftRole}`
+        : "",
+      mode === "conte"
+        ? `CAST_RIGHT:${safeRightRole}`
+        : "",
+      stageStyle
+        ? `STAGE:${stageStyle}`
+        : "",
+      leftCostume
+        ? `LEFT_COSTUME:${leftCostume}`
+        : "",
+      rightCostume
+        ? `RIGHT_COSTUME:${rightCostume}`
+        : "",
+      mode === "conte"
+        ? `LEFT_ROLE:${safeLeftRole}`
+        : "",
+      mode === "conte"
+        ? `RIGHT_ROLE:${safeRightRole}`
+        : ""
+    ]
+      .filter(Boolean)
+      .join(" | ");
 
     return res.status(200).json({
       ok: true,
@@ -1444,23 +2184,33 @@ export default async function handler(req, res) {
         stage_style: stageStyle,
         left_costume: leftCostume,
         right_costume: rightCostume,
-        left_role: mode === "conte" ? bokeName : "",
-        right_role: mode === "conte" ? tsukkomiName : "",
+        left_role:
+          mode === "conte" ? bokeName : "",
+        right_role:
+          mode === "conte" ? tsukkomiName : "",
         structure: structureMeta,
         techniques: techniquesForMeta,
-        usage_count: consumption.output_count ?? 0,
-        paid_credits: consumption.paid_credits ?? 0
+        usage_count:
+          consumption.output_count ?? 0,
+        paid_credits:
+          consumption.paid_credits ?? 0
       },
       target_length: targetLen,
       min_length: minLen,
       max_length: maxLen,
-      tsukkomi_outro: mode === "manzai" ? `${tsukkomiName}: もういいよ！` : "",
+      tsukkomi_outro:
+        mode === "manzai"
+          ? `${tsukkomiName}: もういいよ！`
+          : "",
       consumed: consumption.consumed ?? null
     });
+
   } catch (err) {
     console.error("[openai error raw]", err);
     console.error("[openai error cause]", err?.cause);
+
     const e = normalizeError(err);
+
     console.error("[openai error normalized]", e);
 
     return res.status(e.status || 500).json({
@@ -1479,3 +2229,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+
