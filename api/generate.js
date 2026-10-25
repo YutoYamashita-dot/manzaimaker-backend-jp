@@ -1,5 +1,4 @@
-
- // api/generate.js
+// api/generate.js
 export const config = { runtime: "nodejs" };
 
 import OpenAI from "openai";
@@ -490,6 +489,35 @@ const HUMAN_ROLE_WORDS = [
   "勇者", "魔王", "ウェイター", "シェフ", "大将", "駅員", "車掌", "トレーナー"
 ];
 
+const COSTUME_DIALOGUE_KEYWORDS = {
+  ANIMAL_PANDA: ["笹", "竹", "白黒", "パンダ", "上野", "和歌山", "タイヤ", "転が"],
+  ANIMAL_CAT: ["ニャ", "にゃ", "猫", "ネコ", "ちゅーる", "チュール", "マタタビ", "またたび", "毛玉", "こたつ", "爪とぎ", "ネズミ"],
+  ANIMAL_DOG: ["ワン", "わん", "犬", "柴犬", "番犬", "散歩", "リード", "お手", "お座り", "骨", "飼い主"],
+  ANIMAL_GORILLA: ["ウホ", "ドラミング", "ゴリラ", "バナナ", "ジャングル", "握力", "霊長類"],
+  ANIMAL_BEAR: ["冬眠", "ハチミツ", "鮭", "シャケ", "クマ", "熊", "木彫り"],
+  ANIMAL_RABBIT: ["ピョン", "ぴょん", "ウサギ", "うさぎ", "ニンジン", "人参", "耳が長"],
+  ANIMAL_BIRD_PENGUIN: ["南極", "氷", "ペンギン", "飛べない", "皇帝"],
+  ANIMAL_OCTOPUS: ["墨", "吸盤", "8本", "八本", "タコ", "たこ焼き"],
+  ANIMAL_ALIEN: ["地球", "UFO", "宇宙", "母星", "侵略", "ワレワレ", "銀河"],
+  OBJECT_FRIDGE: ["冷やす", "冷凍", "野菜室", "庫内", "賞味期限", "ドアを開け"],
+  OBJECT_SMARTPHONE: ["充電", "バッテリー", "通知", "アプリ", "検索", "画面", "Wi-Fi", "ギガ"],
+  OBJECT_APPLE: ["果汁", "蜜", "青森", "皮をむ", "アップル"],
+  OBJECT_ONIGIRI: ["海苔", "具", "梅", "ツナマヨ", "米", "握", "コンビニの棚"],
+  OBJECT_TRAFFIC_LIGHT: ["赤信号", "青信号", "交差点", "止まれ", "点滅"],
+  OBJECT_SWORD: ["抜くな", "勇者", "鞘", "刃", "斬", "封印"],
+  OBJECT_TOILET: ["流す", "レバー", "便座", "ウォシュレット", "個室"],
+  OBJECT_ROBOT: ["AI", "プログラム", "計算", "エラー", "ロボット"]
+};
+
+function scoreSpeechByCostume(speechText, costumeCode) {
+  if (!speechText || !costumeCode || !COSTUME_DIALOGUE_KEYWORDS[costumeCode]) return 0;
+  let score = 0;
+  for (const kw of COSTUME_DIALOGUE_KEYWORDS[costumeCode]) {
+    if (speechText.includes(kw)) score += 40;
+  }
+  return score;
+}
+
 function inferRoleCostume(role) {
   const name = String(role || "")
     .trim()
@@ -520,8 +548,6 @@ function inferRoleCostume(role) {
 
     const after = name.slice(pos + keyword.length);
 
-    // 「面接官を採点する応募者」のように
-    // 目的語として前に出ている語よりも末尾の主語を優先
     if (
       /^(を|に|と|より|から|の)/.test(after) &&
       pos < name.length - keyword.length - 1
@@ -587,8 +613,6 @@ function reconcileRoleCostume(role, generatedCode) {
   }
 
   if (inferred.kind === "human") {
-    // 役名から明確な人間コスチュームが
-    // 特定できた場合はそれを最優先する
     if (
       inferred.costume &&
       inferred.costume !== "CASUAL_PLAIN"
@@ -800,7 +824,7 @@ function detectTsukkomiSpeakerFromScript(
 
   for (const line of lines) {
     const m = line.match(
-      /^([^:\n：]{1,15})[：:]\s*/
+      /^([^:\n：]{1,35})[：:]\s*/
     );
 
     if (m) {
@@ -854,6 +878,12 @@ function ensureManzaiTsukkomiOutro(
     : outro;
 }
 
+/**
+ * ★ 強化版：台本内の話者ラベルをユーザーの指定した左(leftRole)・右(rightRole)へ確実に正規化する
+ * - 異なる動物同士（パンダ vs 猫など）は強いマイナス補正をかけて混同を防止
+ * - セリフ本文の動物・物キーワード（笹・竹 vs ニャー等）とツッコミタグからも左右を特定
+ * - すべてのセリフ行を必ず leftRole または rightRole のいずれかに統一して出力
+ */
 function canonicalizeConteSpeakerLabels(
   text,
   leftRole,
@@ -892,22 +922,10 @@ function canonicalizeConteSpeakerLabels(
 
   const normalizeSideHint = (original) => {
     const s = String(original || "").trim();
-
-    if (
-      /^(?:左(?:側|役)?|ボケ役?|A|①|1)(?:[（(].*?[）)])?$/.test(s)
-    ) {
-      return 0;
-    }
-
-    if (
-      /^(?:右(?:側|役)?|ツッコミ役?|B|②|2)(?:[（(].*?[）)])?$/.test(s)
-    ) {
-      return 1;
-    }
-
+    if (/^(?:左(?:側|役)?|ボケ役?|A|①|1)(?:[（(].*?[）)])?$/.test(s)) return 0;
+    if (/^(?:右(?:側|役)?|ツッコミ役?|B|②|2)(?:[（(].*?[）)])?$/.test(s)) return 1;
     if (/^(?:左|ボケ)[:：]/.test(s)) return 0;
     if (/^(?:右|ツッコミ)[:：]/.test(s)) return 1;
-
     return null;
   };
 
@@ -915,26 +933,21 @@ function canonicalizeConteSpeakerLabels(
     const role = cast[sideIdx];
     if (!speaker || !role) return 0;
 
-    if (speaker === role) return 150;
+    if (speaker === role) return 220;
 
     const spkKind = inferRoleCostume(speaker);
     const roleKind = castInferred[sideIdx];
 
+    // 動物・物同士の判定：一致なら+180、不一致（パンダ vs 猫など）なら-200で絶対混同しない
     if (spkKind.kind === "nonhuman") {
-      if (roleKind.kind === "human") return 0;
-
+      if (roleKind.kind === "human") return -180;
       if (roleKind.kind === "nonhuman") {
-        return spkKind.costume === roleKind.costume
-          ? 130
-          : 0;
+        return spkKind.costume === roleKind.costume ? 180 : -200;
       }
     }
 
-    if (
-      spkKind.kind === "human" &&
-      roleKind.kind === "nonhuman"
-    ) {
-      return 0;
+    if (spkKind.kind === "human" && roleKind.kind === "nonhuman") {
+      return -180;
     }
 
     if (
@@ -944,36 +957,13 @@ function canonicalizeConteSpeakerLabels(
       roleKind.costume !== "CASUAL_PLAIN" &&
       spkKind.costume === roleKind.costume
     ) {
-      return 115;
+      return 140;
     }
 
-    if (
-      speaker.length >= 2 &&
-      role.endsWith(speaker)
-    ) {
-      return 110;
-    }
-
-    if (
-      speaker.length >= 2 &&
-      role.startsWith(speaker)
-    ) {
-      return 95;
-    }
-
-    if (
-      speaker.length >= 2 &&
-      role.includes(speaker)
-    ) {
-      return 80;
-    }
-
-    if (
-      role.length >= 2 &&
-      speaker.includes(role)
-    ) {
-      return 75;
-    }
+    if (speaker.length >= 2 && role.endsWith(speaker)) return 120;
+    if (speaker.length >= 2 && role.startsWith(speaker)) return 105;
+    if (speaker.length >= 2 && role.includes(speaker)) return 90;
+    if (role.length >= 2 && speaker.includes(role)) return 85;
 
     const aliases = {
       "犬": "柴犬",
@@ -1000,121 +990,142 @@ function canonicalizeConteSpeakerLabels(
     };
 
     const canonical = aliases[speaker] || speaker;
-
-    if (
-      canonical !== speaker &&
-      role.includes(canonical)
-    ) {
-      return 70;
+    if (canonical !== speaker && role.includes(canonical)) {
+      return 75;
     }
 
     return 0;
   };
 
+  // 1行ごとに直接左(0)か右(1)か判定するヘルパー
+  const directLineSide = (rawLabel, speechText) => {
+    const hint = normalizeSideHint(rawLabel);
+    if (hint !== null) return hint;
+
+    const norm = normalize(rawLabel);
+    const s0 = matchScore(norm, 0);
+    const s1 = matchScore(norm, 1);
+
+    if (s0 > s1 && s0 >= 60) return 0;
+    if (s1 > s0 && s1 >= 60) return 1;
+
+    // 話者名から決まらない場合、セリフ本文の動物・物キーワードで判定
+    const kw0 = scoreSpeechByCostume(speechText, castInferred[0].costume);
+    const kw1 = scoreSpeechByCostume(speechText, castInferred[1].costume);
+    if (kw0 > kw1) return 0;
+    if (kw1 > kw0) return 1;
+
+    return null;
+  };
+
   const lines = String(text).split("\n");
-  const labels = [];
+  const turnIndices = [];
+  const parsedTurns = [];
 
-  for (const line of lines) {
-    const m = line.match(
-      /^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/
-    );
-
-    if (
-      m &&
-      !/^\d+$/.test(m[2].trim())
-    ) {
-      const name = m[2].trim();
-
-      if (!labels.includes(name)) {
-        labels.push(name);
-      }
-    }
-  }
-
-  const assigned = new Map();
-
-  for (const label of labels) {
-    const hint = normalizeSideHint(label);
-
-    if (hint !== null) {
-      assigned.set(label, hint);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const m = line.match(/^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/);
+    if (!m) continue;
+    const rawSpeaker = m[2].trim();
+    if (/^\d+$/.test(rawSpeaker)) continue;
+    if (/^(?:STAGE|LEFT_COSTUME|RIGHT_COSTUME|CAST_LEFT|CAST_RIGHT|LEFT_ROLE|RIGHT_ROLE|タイトル|Title)$/i.test(rawSpeaker)) {
       continue;
     }
-
-    const name = normalize(label);
-    const s0 = matchScore(name, 0);
-    const s1 = matchScore(name, 1);
-
-    if (
-      s0 > s1 &&
-      s0 >= 55
-    ) {
-      assigned.set(label, 0);
-    } else if (
-      s1 > s0 &&
-      s1 >= 55
-    ) {
-      assigned.set(label, 1);
-    }
+    turnIndices.push(i);
+    parsedTurns.push({
+      lineIdx: i,
+      indent: m[1],
+      rawLabel: rawSpeaker,
+      normLabel: normalize(rawSpeaker),
+      rest: m[3].trimStart(),
+      side: null
+    });
   }
 
-  const unknown = labels.filter(
-    (label) => !assigned.has(label)
-  );
+  if (parsedTurns.length === 0) return text;
 
-  const used = new Set(
-    assigned.values()
-  );
-
-  if (
-    unknown.length === 1 &&
-    used.size === 1
-  ) {
-    const vacant = used.has(0) ? 1 : 0;
-
-    const spokenKind =
-      inferRoleCostume(normalize(unknown[0]));
-
-    const vacantKind = castInferred[vacant];
-
-    if (
-      spokenKind.kind !== "nonhuman" ||
-      (
-        vacantKind.kind === "nonhuman" &&
-        spokenKind.costume === vacantKind.costume
-      )
-    ) {
-      assigned.set(unknown[0], vacant);
-    }
-  } else if (
-    unknown.length === 2 &&
-    used.size === 0
-  ) {
-    assigned.set(unknown[0], 0);
-    assigned.set(unknown[1], 1);
-  }
-
-  return lines
-    .map((line) => {
-      const m = line.match(
-        /^(\s*)([^\n:：]{1,50})[:：](\s*[\s\S]*)$/
-      );
-
-      if (
-        !m ||
-        !assigned.has(m[2].trim())
-      ) {
-        return line;
+  // Step 1: 各行を個別に直接判定し、ラベルごとのマップも構築
+  const labelToSide = new Map();
+  for (const t of parsedTurns) {
+    const direct = directLineSide(t.rawLabel, t.rest);
+    if (direct !== null) {
+      t.side = direct;
+      if (t.normLabel && !labelToSide.has(t.normLabel)) {
+        labelToSide.set(t.normLabel, direct);
       }
+    }
+  }
 
-      const roleName =
-        assigned.get(m[2].trim()) === 0
-          ? leftRole
-          : rightRole;
+  // Step 2: 登場するユニーク話者ラベルが2種類の場合、ペア全体のスコア（直行 vs 交差）で残りを確定
+  const uniqueLabels = [...new Set(parsedTurns.map((t) => t.normLabel).filter(Boolean))];
+  if (uniqueLabels.length === 2) {
+    const [u0, u1] = uniqueLabels;
+    if (labelToSide.has(u0) && !labelToSide.has(u1)) {
+      labelToSide.set(u1, 1 - labelToSide.get(u0));
+    } else if (labelToSide.has(u1) && !labelToSide.has(u0)) {
+      labelToSide.set(u0, 1 - labelToSide.get(u1));
+    } else if (!labelToSide.has(u0) && !labelToSide.has(u1)) {
+      const text0 = parsedTurns.filter((t) => t.normLabel === u0).map((t) => t.rest).join(" ");
+      const text1 = parsedTurns.filter((t) => t.normLabel === u1).map((t) => t.rest).join(" ");
 
-      return `${m[1]}${roleName}: ${m[3].trimStart()}`;
-    })
-    .join("\n");
+      const directTotal =
+        matchScore(u0, 0) +
+        matchScore(u1, 1) +
+        scoreSpeechByCostume(text0, castInferred[0].costume) +
+        scoreSpeechByCostume(text1, castInferred[1].costume);
+
+      const crossTotal =
+        matchScore(u0, 1) +
+        matchScore(u1, 0) +
+        scoreSpeechByCostume(text0, castInferred[1].costume) +
+        scoreSpeechByCostume(text1, castInferred[0].costume);
+
+      if (crossTotal > directTotal) {
+        labelToSide.set(u0, 1);
+        labelToSide.set(u1, 0);
+      } else {
+        labelToSide.set(u0, 0);
+        labelToSide.set(u1, 1);
+      }
+    }
+  }
+
+  // Step 3: 各ターンに labelToSide を反映し、それでも未確定の行は直前の行と交互にする
+  for (let idx = 0; idx < parsedTurns.length; idx++) {
+    const t = parsedTurns[idx];
+    if (t.side === null && labelToSide.has(t.normLabel)) {
+      t.side = labelToSide.get(t.normLabel);
+    }
+    if (t.side === null) {
+      if (idx === 0) {
+        const nextKnown = parsedTurns.length >= 2 ? (parsedTurns[1].side ?? labelToSide.get(parsedTurns[1].normLabel)) : null;
+        t.side = nextKnown != null ? 1 - nextKnown : 0;
+      } else {
+        t.side = 1 - parsedTurns[idx - 1].side;
+      }
+      if (t.normLabel && !labelToSide.has(t.normLabel)) {
+        labelToSide.set(t.normLabel, t.side);
+      }
+    }
+  }
+
+  // Step 4: 万が一AIが全行に同じ話者名を書いて全員同じ側になった場合、交互発話に補正する
+  const distinctSides = new Set(parsedTurns.map((t) => t.side));
+  if (parsedTurns.length >= 2 && distinctSides.size === 1) {
+    const startSide = /\[(?:ツッコミ|叩く|呆れ|怒る|指差し|ズッコケ)\]/.test(parsedTurns[0].rest) ? 1 : 0;
+    for (let idx = 0; idx < parsedTurns.length; idx++) {
+      parsedTurns[idx].side = (startSide + idx) % 2;
+    }
+  }
+
+  // Step 5: 元の行配列を正式な leftRole / rightRole に書き換える
+  const outLines = [...lines];
+  for (const t of parsedTurns) {
+    const roleName = t.side === 0 ? leftRole : rightRole;
+    outLines[t.lineIdx] = `${t.indent}${roleName}: ${t.rest}`;
+  }
+
+  return outLines.join("\n");
 }
 
 function normalizeSpeakerColons(s) {
@@ -1181,8 +1192,9 @@ function splitTitleAndBody(s) {
   const trimmed = String(s).trim();
   const firstLine = trimmed.split(/\r?\n/)[0].trim();
 
+  // 1行目がセリフ行（長い役名や演出タグ付き）の場合はタイトルとして切り取らず全体をbodyにする
   if (
-    /^[^:\n：]{1,25}[：:]\s*\S/.test(firstLine) &&
+    (/^[^:\n：]{1,50}[：:]\s*\S/.test(firstLine) || /\[[^\]]+\]/.test(firstLine)) &&
     !/^(タイトル|Title)/i.test(firstLine)
   ) {
     return {
@@ -1335,8 +1347,6 @@ function buildPromptByMode({
 }) {
   const isConte = mode === "conte";
 
-  // iOS / Android 共通。身体動作は1つ、視覚効果は任意で1つ。
-  // 既存タグはすべて残すことで過去の台本との互換性を維持する。
   const extendedActionRules = [
     "- [驚く] ：両腕を上げてのけぞる。予想外の発言へのリアクション",
     "- [怒る] ：腰に手を当て、体を揺らして怒りを表す",
@@ -2228,5 +2238,3 @@ export default async function handler(req, res) {
     });
   }
 }
-
-
