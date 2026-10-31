@@ -5,6 +5,7 @@ export const config = { runtime: "nodejs" };
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { verifyManzaiAssertion } from "../lib/appAttestVerify.js";
+import { verifyContePaidDownload } from "../lib/verifyContePaidDownload.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -91,8 +92,10 @@ const UNLIMITED_FLAG_VALUE = 999999;
 function resolveQuotaByPlan(
   plan_type = "",
   mode = "manzai",
-  verifiedIOS = false
+  verifiedIOS = false,
+  verifiedContePaid = false
 ) {
+  if (mode === "conte" && verifiedContePaid) return 2147483647;
   if (mode === "manzai" && verifiedIOS) {
     return FREE_QUOTA_IOS_NEW;
   }
@@ -185,7 +188,8 @@ async function checkCredit(
   scoped_user_id,
   plan_type = "",
   mode = "manzai",
-  verifiedIOS = false
+  verifiedIOS = false,
+  verifiedContePaid = false
 ) {
   if (!hasSupabase || !scoped_user_id) {
     throw Object.assign(
@@ -202,7 +206,8 @@ async function checkCredit(
   const quota = resolveQuotaByPlan(
     plan_type,
     mode,
-    verifiedIOS
+    verifiedIOS,
+    verifiedContePaid
   );
 
   return {
@@ -215,7 +220,8 @@ async function consumeAfterSuccess(
   scoped_user_id,
   plan_type = "",
   mode = "manzai",
-  verifiedIOS = false
+  verifiedIOS = false,
+  verifiedContePaid = false
 ) {
   if (!hasSupabase || !scoped_user_id) {
     throw Object.assign(
@@ -227,7 +233,8 @@ async function consumeAfterSuccess(
   const quota = resolveQuotaByPlan(
     plan_type,
     mode,
-    verifiedIOS
+    verifiedIOS,
+    verifiedContePaid
   );
 
   try {
@@ -1980,6 +1987,13 @@ export default async function handler(req, res) {
     }
 
     const plan_type = String(body.plan_type || "").trim();
+    const isContePaidPlan = mode === "conte" && plan_type === "conte_ios_paid";
+    // Require Apple-signed app purchase proof. A fake plan_type alone grants nothing.
+    // Every other app and plan keeps its existing behavior.
+    let verifiedContePaid = false;
+    if (isContePaidPlan) {
+      verifiedContePaid = await verifyContePaidDownload(body.app_transaction_jws);
+    }
     const theme = String(body.theme || "").trim();
     const genre = String(body.genre || "").trim();
     const characters = body.characters ?? "";
@@ -2010,7 +2024,8 @@ export default async function handler(req, res) {
       scopedUserId,
       plan_type,
       mode,
-      verifiedIOS
+      verifiedIOS,
+      verifiedContePaid
     );
 
     if (!credit.ok) {
@@ -2129,7 +2144,8 @@ export default async function handler(req, res) {
       scopedUserId,
       plan_type,
       mode,
-      verifiedIOS
+      verifiedIOS,
+      verifiedContePaid
     );
 
     const safeLeftRole =
