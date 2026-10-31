@@ -5,7 +5,6 @@ export const config = { runtime: "nodejs" };
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { verifyManzaiAssertion } from "../lib/appAttestVerify.js";
-import { verifyContePaidDownload } from "../lib/verifyContePaidDownload.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -1988,12 +1987,10 @@ export default async function handler(req, res) {
 
     const plan_type = String(body.plan_type || "").trim();
     const isContePaidPlan = mode === "conte" && plan_type === "conte_ios_paid";
-    // Require Apple-signed app purchase proof. A fake plan_type alone grants nothing.
-    // Every other app and plan keeps its existing behavior.
-    let verifiedContePaid = false;
-    if (isContePaidPlan) {
-      verifiedContePaid = await verifyContePaidDownload(body.app_transaction_jws);
-    }
+    // Paid iOS ConteMaker: no in-app purchase/Apple JWS check.
+    // Other app plans continue using their original credit logic.
+    // SECURITY NOTE: plan_type is client-controlled; this route is not proof of payment.
+    const verifiedContePaid = false;
     const theme = String(body.theme || "").trim();
     const genre = String(body.genre || "").trim();
     const characters = body.characters ?? "";
@@ -2020,13 +2017,15 @@ export default async function handler(req, res) {
           : []
     };
 
-    const credit = await checkCredit(
-      scopedUserId,
-      plan_type,
-      mode,
-      verifiedIOS,
-      verifiedContePaid
-    );
+    const credit = isContePaidPlan
+      ? { ok: true, row: { output_count: 0, paid_credits: 0 } }
+      : await checkCredit(
+          scopedUserId,
+          plan_type,
+          mode,
+          verifiedIOS,
+          verifiedContePaid
+        );
 
     if (!credit.ok) {
       return res.status(402).json({
@@ -2140,13 +2139,15 @@ export default async function handler(req, res) {
       );
     }
 
-    const consumption = await consumeAfterSuccess(
-      scopedUserId,
-      plan_type,
-      mode,
-      verifiedIOS,
-      verifiedContePaid
-    );
+    const consumption = isContePaidPlan
+      ? { consumed: false, output_count: 0, paid_credits: 0 }
+      : await consumeAfterSuccess(
+          scopedUserId,
+          plan_type,
+          mode,
+          verifiedIOS,
+          verifiedContePaid
+        );
 
     const safeLeftRole =
       bokeName.replace(/[|\r\n]/g, " ");
