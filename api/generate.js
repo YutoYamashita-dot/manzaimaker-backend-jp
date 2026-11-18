@@ -83,7 +83,7 @@ function resolveScopedUserId(rawUserId, mode) {
  * Supabase / Credit 管理
  * ========================= */
 
-const FREE_QUOTA_DEFAULT = 500;
+const FREE_QUOTA_DEFAULT = 500; // コント等、既存プランの制限として維持
 const FREE_QUOTA_IOS_NEW = 3;
 const FREE_QUOTA_ANDROID_AD = 10;
 const UNLIMITED_FLAG_VALUE = 999999;
@@ -99,8 +99,9 @@ function resolveQuotaByPlan(
     return FREE_QUOTA_IOS_NEW;
   }
 
+  // 漫才は上限判定を使用しない。記録は record_unlimited_manzai_generation RPC で行う。
   if (mode === "manzai") {
-    return FREE_QUOTA_DEFAULT;
+    return 0;
   }
 
   if (plan_type === "conte_ios_unlimited") {
@@ -199,6 +200,11 @@ async function checkCredit(
 
   const row = await getUsageRow(scoped_user_id);
 
+  // 漫才：残クレジットにかかわらず生成を許可（履歴の読み出しは継続）
+  if (mode === "manzai") {
+    return { ok: true, row };
+  }
+
   const used = row.output_count ?? 0;
   const paid = row.paid_credits ?? 0;
 
@@ -227,6 +233,27 @@ async function consumeAfterSuccess(
       new Error("Usage service unavailable or user_id missing"),
       { status: 503 }
     );
+  }
+
+  // 漫才は専用RPCで回数のみ原子的に記録する。購入済みクレジットを減らさない。
+  // 専用RPCの作成SQL: supabase_record_unlimited_manzai_generation.sql
+  if (mode === "manzai") {
+    try {
+      const { data, error } = await supabase.rpc(
+        "record_unlimited_manzai_generation",
+        { p_user_id: scoped_user_id }
+      );
+      if (error) throw error;
+      if (!data || data.ok !== true) throw new Error("Usage recording failed");
+      return {
+        consumed: "unlimited",
+        output_count: data.output_count,
+        paid_credits: data.paid_credits
+      };
+    } catch (e) {
+      console.error("[supabase] record unlimited manzai failed:", e?.message || e);
+      throw Object.assign(new Error("Usage update unavailable"), { status: 503 });
+    }
   }
 
   const quota = resolveQuotaByPlan(
