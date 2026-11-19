@@ -2,7 +2,6 @@
  // api/generate.js
 export const config = { runtime: "nodejs" };
 
-import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 import { verifyManzaiAssertion } from "../lib/appAttestVerify.js";
 
@@ -1668,130 +1667,267 @@ function buildPromptByMode({
   };
 }
 
+
 /* =========================
- * OpenAI クライアント
+ * Google Gemini API クライアント
+ * Gemini 4 Hydrogen
  * ========================= */
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-6-luna";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || "gemini-4-hydrogen";
 
-const openai = OPENAI_API_KEY
-  ? new OpenAI({ apiKey: OPENAI_API_KEY })
-  : null;
+const GEMINI_API_BASE =
+  "https://generativelanguage.googleapis.com/v1beta/models";
 
-function extractTextFromResponse(response) {
-  if (!response) return "";
+const GEMINI_MAX_OUTPUT_TOKENS = 16384;
 
-  if (
-    typeof response.output_text === "string" &&
-    response.output_text.trim().length > 0
-  ) {
-    return response.output_text;
+const configuredThinkingLevel = String(
+  process.env.GEMINI_THINKING_LEVEL || "LOW"
+).trim().toUpperCase();
+
+const GEMINI_THINKING_LEVEL =
+  ["LOW", "MEDIUM", "HIGH", "XHIGH"].includes(
+    configuredThinkingLevel
+  )
+    ? configuredThinkingLevel
+    : "LOW";
+
+function extractGeminiText(response) {
+  const candidate = response?.candidates?.[0];
+  const parts = candidate?.content?.parts;
+
+  if (!Array.isArray(parts)) return "";
+
+  return parts
+    .filter(
+      (part) =>
+        part &&
+        part.thought !== true &&
+        typeof part.text === "string"
+    )
+    .map((part) => part.text)
+    .join("")
+    .trim();
+}
+
+function geminiApiError(status, body) {
+  const upstream = body?.error || {};
+
+  const message = String(
+    upstream.message ||
+      `Gemini API returned HTTP ${status}`
+  );
+
+  const err = new Error(message);
+  err.name = "GeminiAPIError";
+  err.status = status;
+  err.code =
+    upstream.status ||
+    upstream.code ||
+    "GEMINI_API_ERROR";
+
+  return err;
+}
+
+async function generateWithGemini(payload = {}) {
+  if (!GEMINI_API_KEY) {
+    const err = new Error(
+      "GEMINI_API_KEY is not set"
+    );
+    err.status = 500;
+    throw err;
   }
 
-  if (Array.isArray(response.output)) {
-    const chunks = [];
+  const model = String(
+    payload.model || GEMINI_MODEL
+  ).trim();
 
-    for (const item of response.output) {
-      if (typeof item?.text === "string") {
-        chunks.push(item.text);
-      }
+  if (!/^[a-zA-Z0-9._-]+$/.test(model)) {
+    const err = new Error("Invalid GEMINI_MODEL");
+    err.status = 400;
+    throw err;
+  }
 
-      if (Array.isArray(item?.content)) {
-        for (const c of item.content) {
-          if (typeof c?.text === "string") {
-            chunks.push(c.text);
-          } else if (typeof c?.output_text === "string") {
-            chunks.push(c.output_text);
-          }
+  const messages = Array.isArray(payload.messages)
+    ? payload.messages
+    : [];
+
+  const systemTexts = messages
+    .filter((m) => m?.role === "system")
+    .map((m) => String(m.content ?? ""))
+    .filter(Boolean);
+
+  const contents = messages
+    .filter((m) => m?.role !== "system")
+    .map((m) => ({
+      role: m?.role === "assistant"
+        ? "model"
+        : "user",
+      parts: [
+        {
+          text: String(m?.content ?? "")
         }
+      ]
+    }));
+
+  if (!contents.length) {
+    const err = new Error(
+      "Gemini API requires a user message"
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  const request = {
+    contents,
+    generationConfig: {
+      maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+      thinkingConfig: {
+        thinkingLevel: GEMINI_THINKING_LEVEL
       }
     }
+  };
 
-    const joined = chunks.join("\n").trim();
-    if (joined.length > 0) return joined;
+  if (systemTexts.length) {
+    request.systemInstruction = {
+      parts: [
+        {
+          text: systemTexts.join("\n\n")
+        }
+      ]
+    };
   }
 
-  if (
-    typeof response?.choices?.[0]?.message?.content === "string"
+  const url =
+    `${GEMINI_API_BASE}/` +
+    `${encodeURIComponent(model)}:generateContent`;
+
+  const maxRetries = 2;
+
+  for (
+    let attempt = 0;
+    attempt <= maxRetries;
+    attempt++
   ) {
-    return response.choices[0].message.content;
-  }
+    let response;
 
-  return "";
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY
+        },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(120000)
+      });
+    } catch (err) {
+      if (
+        attempt < maxRetries &&
+        err?.name !== "TimeoutError"
+      ) {
+        await new Promise((resolve) =>
+          setTimeout(
+            resolve,
+            1000 * (attempt + 1)
+          )
+        );
+        continue;
+      }
+
+      const failed = new Error(
+        `Gemini API connection failed: ${
+          err?.message || err
+        }`
+      );
+      failed.status = 502;
+      throw failed;
+    }
+
+    let data;
+
+    try {
+      data = await response.json();
+    } catch (_err) {
+      const failed = new Error(
+        "Gemini API returned invalid JSON"
+      );
+      failed.status = 502;
+      throw failed;
+    }
+
+    if (!response.ok) {
+      if (
+        [429, 500, 502, 503, 504].includes(
+          response.status
+        ) &&
+        attempt < maxRetries
+      ) {
+        const retryAfter = Number(
+          response.headers?.get?.("retry-after")
+        );
+
+        const delayMs =
+          Number.isFinite(retryAfter) &&
+          retryAfter > 0
+            ? Math.min(
+                retryAfter * 1000,
+                5000
+              )
+            : 1000 * (attempt + 1);
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayMs)
+        );
+
+        continue;
+      }
+
+      throw geminiApiError(
+        response.status,
+        data
+      );
+    }
+
+    const text = extractGeminiText(data);
+
+    if (!text) {
+      const reason =
+        data?.candidates?.[0]?.finishReason ||
+        data?.promptFeedback?.blockReason ||
+        "EMPTY_RESPONSE";
+
+      const failed = new Error(
+        `Gemini API response text was empty (${reason})`
+      );
+
+      failed.status = 502;
+      throw failed;
+    }
+
+    // 既存コードとの互換性を維持
+    return {
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: text
+          }
+        }
+      ]
+    };
+  }
 }
 
 const client = {
   chat: {
     completions: {
-      async create(payload) {
-        if (!openai) {
-          const err = new Error("OPENAI_API_KEY is not set");
-          err.status = 500;
-          throw err;
-        }
-
-        const model = payload.model || OPENAI_MODEL;
-
-        const messages = Array.isArray(payload.messages)
-          ? payload.messages
-          : [];
-
-        const input = messages.map((m) => ({
-          role:
-            m.role === "assistant"
-              ? "assistant"
-              : m.role === "system"
-                ? "system"
-                : "user",
-          content: String(m.content ?? "")
-        }));
-
-        const request = {
-          model,
-          input,
-          max_output_tokens: 16384
-        };
-
-        const response = await openai.responses.create(request);
-        const text = extractTextFromResponse(response);
-
-        if (!text) {
-          console.warn(
-            "[openai] response text was empty. status:",
-            response?.status,
-            "incomplete_details:",
-            response?.incomplete_details
-          );
-        }
-
-        return {
-          choices: [
-            {
-              message: {
-                role: "assistant",
-                content: text
-              }
-            }
-          ]
-        };
-      }
+      create: generateWithGemini
     }
   }
 };
 
-function normalizeError(err) {
-  return {
-    name: err?.name,
-    message: err?.message,
-    status: err?.status ?? err?.response?.status,
-    data: err?.response?.data ?? err?.error,
-    stack:
-      process.env.NODE_ENV === "production"
-        ? undefined
-        : err?.stack
-  };
-}
 
 /* =========================
  * メイン handler
@@ -1875,7 +2011,7 @@ export default async function handler(req, res) {
         ].join("\n");
 
         const aiResp = await client.chat.completions.create({
-          model: OPENAI_MODEL,
+          model: GEMINI_MODEL,
           messages: [
             {
               role: "system",
@@ -1944,7 +2080,7 @@ export default async function handler(req, res) {
         ].join("\n");
 
         const aiResp = await client.chat.completions.create({
-          model: OPENAI_MODEL,
+          model: GEMINI_MODEL,
           messages: [
             {
               role: "system",
@@ -2087,7 +2223,7 @@ export default async function handler(req, res) {
     });
 
     const response = await client.chat.completions.create({
-      model: OPENAI_MODEL,
+      model: GEMINI_MODEL,
       messages: [
         {
           role: "system",
@@ -2249,27 +2385,23 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error("[openai error raw]", err);
-    console.error("[openai error cause]", err?.cause);
+    console.error("[gemini error raw]", err);
+console.error("[gemini error cause]", err?.cause);
 
-    const e = normalizeError(err);
+const e = normalizeError(err);
 
-    console.error("[openai error normalized]", e);
+console.error("[gemini error normalized]", e);
 
-    return res.status(e.status || 500).json({
-      error: "OpenAI request failed",
-      detail: e,
-      cause: err?.cause
-        ? {
-            name: err.cause.name,
-            message: err.cause.message,
-            code: err.cause.code,
-            errno: err.cause.errno,
-            syscall: err.cause.errno,
-            hostname: err.cause.hostname
-          }
-        : null
-    });
+return res.status(e.status || 500).json({
+  error: "Gemini request failed",
+  detail: e,
+  cause: err?.cause
+    ? {
+        name: err.cause.name,
+        message: err.cause.message
+      }
+    : undefined
+});
   }
 }
 
